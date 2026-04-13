@@ -33,7 +33,7 @@ def create_app(
     launcher_port: int,
     target_host: str = "0.0.0.0",
     target_port: int = 8765,
-    default_fps: int = 6,
+    default_fps: int = 12,
     wake_relay_url: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="PC Phone Link Launcher", docs_url=None, redoc_url=None)
@@ -148,7 +148,7 @@ def main() -> int:
     parser.add_argument("--token", default=None, help="Optional access token shown to the phone.")
     parser.add_argument("--target-host", default="0.0.0.0", help="Host interface to bind the main controls to.")
     parser.add_argument("--target-port", type=int, default=8765, help="Main PC Phone Link host port.")
-    parser.add_argument("--fps", type=int, default=6, help="Default stream FPS for the started host server.")
+    parser.add_argument("--fps", type=int, default=12, help="Default stream FPS for the started host server.")
     parser.add_argument(
         "--auto-start-host",
         action="store_true",

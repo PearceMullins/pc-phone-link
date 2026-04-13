@@ -15,7 +15,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8764, help="Launcher port.")
     parser.add_argument("--target-host", default="0.0.0.0", help="Main control host bind address.")
     parser.add_argument("--target-port", type=int, default=8765, help="Main control port.")
-    parser.add_argument("--fps", type=int, default=6, help="Default stream FPS for the main host.")
+    parser.add_argument("--fps", type=int, default=12, help="Default stream FPS for the main host.")
     parser.add_argument("--wake-relay-url", default=None, help="Optional wake relay URL passed through to the host.")
     parser.add_argument("--startup-dir", default=None, help="Optional startup folder override, useful for testing.")
     args = parser.parse_args()

@@ -3,6 +3,8 @@
   font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   background: #060a12;
   color: #f4f7ff;
+  --app-viewport-height: 100vh;
+  --app-viewport-offset-top: 0px;
 }
 
 * {
@@ -12,6 +14,7 @@
 html,
 body {
   margin: 0;
+  height: 100%;
   min-height: 100%;
   overflow: hidden;
   background: #060a12;
@@ -19,6 +22,7 @@ body {
 
 body {
   touch-action: manipulation;
+  overscroll-behavior: none;
 }
 
 button,
@@ -27,9 +31,9 @@ input {
 }
 
 button {
-  border: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 1rem;
-  background: #3159df;
+  background: rgba(255, 255, 255, 0.08);
   color: #f8faff;
   padding: 0.85rem 1rem;
   min-height: 3rem;
@@ -46,6 +50,7 @@ button:active {
 
 button.mode-active {
   background: #ff985d;
+  border-color: transparent;
   color: #0d1118;
 }
 
@@ -54,24 +59,38 @@ button.mode-active {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.primary-button {
+  background: #3159df;
+  border-color: transparent;
+  color: #f8faff;
+}
+
 #app {
-  position: relative;
+  position: fixed;
+  top: var(--app-viewport-offset-top);
+  left: 0;
+  right: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
-  min-height: 100vh;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  width: 100%;
+  height: var(--app-viewport-height);
+  min-height: var(--app-viewport-height);
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
+  overflow: hidden;
 }
 
 .topbar {
+  grid-row: 2;
   position: relative;
   z-index: 15;
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 0.75rem;
   align-items: center;
-  padding: 0.85rem 0.9rem 0.6rem;
-  background: linear-gradient(180deg, rgba(6, 10, 18, 0.96), rgba(6, 10, 18, 0.3));
+  padding: 0.7rem 0.9rem 0.85rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(0deg, rgba(6, 10, 18, 0.96), rgba(6, 10, 18, 0.3));
 }
 
 .title-stack {
@@ -103,6 +122,7 @@ button.mode-active {
 }
 
 .viewer-shell {
+  grid-row: 1;
   position: relative;
   min-height: 0;
   background: #010204;
@@ -176,6 +196,7 @@ button.mode-active {
 }
 
 .keyboard-panel {
+  grid-row: 3;
   position: relative;
   z-index: 15;
   display: grid;
@@ -194,6 +215,10 @@ button.mode-active {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 0.55rem;
+}
+
+.text-form button {
+  min-width: 4.8rem;
 }
 
 .text-form textarea,
@@ -330,6 +355,10 @@ button.mode-active {
   accent-color: #5f87ff;
 }
 
+#applyTextScale {
+  width: 100%;
+}
+
 .toggle-setting {
   display: flex;
   align-items: center;
@@ -402,6 +431,17 @@ button.mode-active {
   margin: 0;
 }
 
+.auth-status {
+  color: #d7e3ff;
+  line-height: 1.5;
+}
+
+.auth-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
 .toast {
   position: absolute;
   left: 50%;
@@ -424,11 +464,12 @@ button.mode-active {
 @media (min-width: 900px) {
   #app {
     grid-template-columns: 22rem minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-rows: minmax(0, 1fr) auto auto;
   }
 
   .window-drawer {
     position: relative;
+    grid-row: 1 / span 3;
     transform: none;
     width: auto;
     border-right: 1px solid rgba(255, 255, 255, 0.08);

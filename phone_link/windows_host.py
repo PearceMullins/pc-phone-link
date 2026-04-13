@@ -31,6 +31,7 @@ INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
 ULONG_PTR = getattr(wintypes, "ULONG_PTR", wintypes.WPARAM)
+LPCWSTR = getattr(wintypes, "LPCWSTR", ctypes.c_wchar_p)
 HWND_BROADCAST = 0xFFFF
 WM_SETTINGCHANGE = 0x001A
 SMTO_ABORTIFHUNG = 0x0002
@@ -41,6 +42,18 @@ TEXT_SCALE_MAX = 225
 TEXT_SCALE_STEP = 5
 SETTING_CHANGE_TIMEOUT_MS = 5000
 FULLSCREEN_TARGET_HWND = -1
+
+send_message_timeout = user32.SendMessageTimeoutW
+send_message_timeout.argtypes = [
+    wintypes.HWND,
+    wintypes.UINT,
+    wintypes.WPARAM,
+    LPCWSTR,
+    wintypes.UINT,
+    wintypes.UINT,
+    ctypes.POINTER(ULONG_PTR),
+]
+send_message_timeout.restype = wintypes.LPARAM
 
 
 class WindowLookupError(RuntimeError):
@@ -416,9 +429,9 @@ def capture_window(hwnd: int, target_width: int | None = None) -> Image.Image:
     return image
 
 
-def encode_jpeg(image: Image.Image, quality: int = 60) -> bytes:
+def encode_jpeg(image: Image.Image, quality: int = 42) -> bytes:
     buffer = io.BytesIO()
-    image.save(buffer, format="JPEG", quality=quality, optimize=True)
+    image.save(buffer, format="JPEG", quality=quality)
     return buffer.getvalue()
 
 
@@ -616,17 +629,30 @@ def press_special_key(hwnd: int, key_name: str) -> None:
     )
 
 
-def adjust_system_text_size(action: str) -> TextScaleChange:
+def get_system_text_scale() -> int:
+    return _read_text_scale_factor()
+
+
+def adjust_system_text_size(action: str, value: int | None = None) -> TextScaleChange:
     normalized = action.strip().lower()
+    current_value = _read_text_scale_factor()
+
     if normalized == "larger":
-        delta = TEXT_SCALE_STEP
+        next_value = max(TEXT_SCALE_MIN, min(current_value + TEXT_SCALE_STEP, TEXT_SCALE_MAX))
     elif normalized == "smaller":
-        delta = -TEXT_SCALE_STEP
+        next_value = max(TEXT_SCALE_MIN, min(current_value - TEXT_SCALE_STEP, TEXT_SCALE_MAX))
+    elif normalized == "set":
+        if value is None:
+            raise ValueError("A text size value is required.")
+        try:
+            next_value = int(value)
+        except (TypeError, ValueError) as error:
+            raise ValueError("The text size value must be a whole number.") from error
+        if next_value < TEXT_SCALE_MIN or next_value > TEXT_SCALE_MAX:
+            raise ValueError(f"The text size value must be between {TEXT_SCALE_MIN}% and {TEXT_SCALE_MAX}%.")
     else:
         raise ValueError(f"Unsupported text size action: {action}")
 
-    current_value = _read_text_scale_factor()
-    next_value = max(TEXT_SCALE_MIN, min(current_value + delta, TEXT_SCALE_MAX))
     if next_value == current_value:
         return TextScaleChange(value=current_value, changed=False, applied_immediately=True)
 
@@ -641,6 +667,7 @@ def adjust_system_text_size(action: str) -> TextScaleChange:
         "text-size-adjusted",
         {
             "action": normalized,
+            "requested_value": value if normalized == "set" else None,
             "previous_value": current_value,
             "next_value": result.value,
             "applied_immediately": result.applied_immediately,
@@ -672,17 +699,21 @@ def _write_text_scale_factor(value: int) -> None:
 
 
 def _broadcast_text_scale_change() -> bool:
-    result = ULONG_PTR()
-    response = user32.SendMessageTimeoutW(
-        HWND_BROADCAST,
-        WM_SETTINGCHANGE,
-        0,
-        "Accessibility",
-        SMTO_ABORTIFHUNG,
-        SETTING_CHANGE_TIMEOUT_MS,
-        ctypes.byref(result),
-    )
-    return response != 0
+    section_names = ("Accessibility", "WindowMetrics")
+    succeeded = False
+    for section_name in section_names:
+        result = ULONG_PTR()
+        response = send_message_timeout(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            0,
+            section_name,
+            SMTO_ABORTIFHUNG,
+            SETTING_CHANGE_TIMEOUT_MS,
+            ctypes.byref(result),
+        )
+        succeeded = succeeded or response != 0
+    return succeeded
 
 
 def _ensure_window(hwnd: int) -> int:

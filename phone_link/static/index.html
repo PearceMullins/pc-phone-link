@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>PC Phone Link</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=20260413c">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260413g">
 </head>
 <body>
   <div id="app">
@@ -35,6 +35,20 @@
           <span>Follow mouse</span>
           <input id="followMouse" type="checkbox">
         </label>
+        <label class="setting-label" for="textScale">
+          <span>PC text size</span>
+          <strong id="textScaleValue">100%</strong>
+        </label>
+        <input
+          id="textScale"
+          class="speed-slider"
+          type="range"
+          min="100"
+          max="225"
+          step="1"
+          value="100"
+        >
+        <button id="applyTextScale" class="ghost-button" type="button" disabled>Apply text size</button>
       </section>
     </aside>
 
@@ -46,6 +60,7 @@
       </div>
       <div class="topbar-actions">
         <button id="fitToggle" class="ghost-button" type="button">Fit</button>
+        <button id="toggleKeyboard" class="ghost-button" type="button">Keyboard</button>
       </div>
     </header>
 
@@ -55,19 +70,6 @@
       <div id="emptyState" class="empty-state" hidden></div>
       <div id="statusPill" class="status-pill">Ready</div>
     </main>
-
-    <footer id="controlBar" class="control-bar">
-      <button id="focusWindow" type="button">Focus</button>
-      <button id="maximizeWindow" type="button">Maximize</button>
-      <button id="restoreWindow" type="button">Restore</button>
-      <button id="rightClickMode" type="button">Right</button>
-      <button id="doubleClickMode" type="button">Double</button>
-      <button id="scrollUp" type="button">Scroll +</button>
-      <button id="scrollDown" type="button">Scroll -</button>
-      <button id="textLarger" type="button">Text +</button>
-      <button id="textSmaller" type="button">Text -</button>
-      <button id="toggleKeyboard" type="button">Keyboard</button>
-    </footer>
 
     <section id="keyboardPanel" class="keyboard-panel hidden">
       <div class="composer-actions">
@@ -90,21 +92,24 @@
           rows="1"
           placeholder="Your phone keyboard now types into the selected PC window"
         ></textarea>
-        <button id="sendText" type="submit">Send</button>
+        <button id="sendText" class="primary-button" type="submit">Send</button>
       </form>
     </section>
 
     <section id="authPanel" class="auth-panel">
       <form id="authForm" class="auth-card">
         <h2>Connect your phone</h2>
-        <p>Enter the access code once on this phone browser. After that, it stays saved here.</p>
-        <input id="authToken" type="text" placeholder="ABCD-EFGH" autocomplete="one-time-code">
-        <button type="submit">Connect</button>
+        <p id="pairingStatus" class="auth-status">Send a connection request to this PC, then approve it on both devices to pair this browser.</p>
+        <input id="pairingDeviceName" type="text" placeholder="This phone" autocomplete="off">
+        <div class="auth-actions">
+          <button id="requestPairing" class="ghost-button" type="submit">Send request</button>
+          <button id="approvePairing" class="primary-button" type="button" disabled>Approve on this phone</button>
+        </div>
       </form>
     </section>
 
     <div id="toast" class="toast hidden"></div>
   </div>
-  <script src="/assets/app.js?v=20260413j" defer></script>
+  <script src="/assets/app.js?v=20260413w" defer></script>
 </body>
 </html>

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>PC Phone Link Wake Relay</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div id="app">
+    <main class="card">
+      <p class="eyebrow">PC Phone Link</p>
+      <h1>Wake your PC</h1>
+      <p class="body-copy">
+        This page runs from another always-on device on your network. Use it to wake your PC,
+        then jump back into your normal phone controls once the PC is ready.
+      </p>
+      <div id="statusPill" class="status-pill">Ready</div>
+      <div class="actions">
+        <button id="wakeButton" type="button">Wake PC</button>
+        <button id="startControls" type="button">Start controls</button>
+        <button id="checkStatus" class="ghost-button" type="button">Check status</button>
+      </div>
+      <a id="openControls" class="primary-link hidden" href="#">Open PC controls</a>
+      <p id="controlHint" class="subtle-copy">
+        Wake the PC, then bring the control server online when you want to connect.
+      </p>
+    </main>
+
+    <section id="authPanel" class="auth-panel">
+      <form id="authForm" class="auth-card">
+        <h2>Connect this phone</h2>
+        <p>Enter the wake relay access code once on this phone browser. After that, it stays saved here.</p>
+        <input id="authToken" type="text" placeholder="ABCD-EFGH" autocomplete="one-time-code">
+        <button type="submit">Connect</button>
+      </form>
+    </section>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

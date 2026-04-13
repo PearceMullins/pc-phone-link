@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>PC Phone Link Launcher</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div id="app">
+    <main class="card">
+      <p class="eyebrow">PC Phone Link</p>
+      <h1>Start PC controls</h1>
+      <p class="body-copy">
+        This page runs on your PC and can start the main PC Phone Link control server
+        before handing your phone over to the full remote-control view.
+      </p>
+      <p id="deviceName" class="subtle-copy">Looking up this PC...</p>
+      <div id="statusPill" class="status-pill">Ready</div>
+      <div class="actions">
+        <button id="startButton" type="button">Start controls</button>
+        <button id="checkStatus" class="ghost-button" type="button">Check status</button>
+      </div>
+      <a id="openControls" class="primary-link hidden" href="#">Open PC controls</a>
+      <p id="controlHint" class="subtle-copy">
+        When the main server is ready, this page can open the full phone control screen.
+      </p>
+    </main>
+
+    <section id="authPanel" class="auth-panel">
+      <form id="authForm" class="auth-card">
+        <h2>Connect this phone</h2>
+        <p>Enter the same PC Phone Link access code you already use for the main controls.</p>
+        <input id="authToken" type="text" placeholder="ABCD-EFGH" autocomplete="one-time-code">
+        <button type="submit">Connect</button>
+      </form>
+    </section>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

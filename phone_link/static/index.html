@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>PC Phone Link</title>
+  <link rel="stylesheet" href="/assets/styles.css?v=20260413c">
+</head>
+<body>
+  <div id="app">
+    <aside id="windowDrawer" class="window-drawer open">
+      <div class="drawer-header">
+        <div>
+          <p class="eyebrow">PC Phone Link</p>
+          <h1>Windows</h1>
+        </div>
+        <button id="refreshWindows" class="ghost-button" type="button">Refresh</button>
+      </div>
+      <div id="windowList" class="window-list"></div>
+      <section class="drawer-settings">
+        <label class="setting-label" for="mouseSpeed">
+          <span>Mouse speed</span>
+          <strong id="mouseSpeedValue">1.00x</strong>
+        </label>
+        <input
+          id="mouseSpeed"
+          class="speed-slider"
+          type="range"
+          min="0.5"
+          max="8"
+          step="0.1"
+          value="2.5"
+        >
+        <label class="toggle-setting" for="followMouse">
+          <span>Follow mouse</span>
+          <input id="followMouse" type="checkbox">
+        </label>
+      </section>
+    </aside>
+
+    <header class="topbar">
+      <button id="toggleDrawer" class="ghost-button" type="button">Windows</button>
+      <div class="title-stack">
+        <span class="eyebrow" id="deviceName">Phone link</span>
+        <strong id="selectedWindowTitle">Open Windows to choose an app or fullscreen view</strong>
+      </div>
+      <div class="topbar-actions">
+        <button id="fitToggle" class="ghost-button" type="button">Fit</button>
+      </div>
+    </header>
+
+    <main id="viewerShell" class="viewer-shell">
+      <img id="remoteView" alt="Selected window stream">
+      <div id="touchLayer" class="touch-layer"></div>
+      <div id="emptyState" class="empty-state" hidden></div>
+      <div id="statusPill" class="status-pill">Ready</div>
+    </main>
+
+    <footer id="controlBar" class="control-bar">
+      <button id="focusWindow" type="button">Focus</button>
+      <button id="maximizeWindow" type="button">Maximize</button>
+      <button id="restoreWindow" type="button">Restore</button>
+      <button id="rightClickMode" type="button">Right</button>
+      <button id="doubleClickMode" type="button">Double</button>
+      <button id="scrollUp" type="button">Scroll +</button>
+      <button id="scrollDown" type="button">Scroll -</button>
+      <button id="textLarger" type="button">Text +</button>
+      <button id="textSmaller" type="button">Text -</button>
+      <button id="toggleKeyboard" type="button">Keyboard</button>
+    </footer>
+
+    <section id="keyboardPanel" class="keyboard-panel hidden">
+      <div class="composer-actions">
+        <button id="toggleMessageHistory" class="ghost-button message-history-toggle" type="button" hidden>
+          Show past messages
+        </button>
+        <button id="clearTextInput" class="ghost-button composer-clear-button" type="button">Clear Chat</button>
+      </div>
+      <section id="messageHistorySection" class="message-history-section" hidden>
+        <p class="eyebrow">Past messages</p>
+        <div id="messageHistory" class="message-history-list"></div>
+      </section>
+      <form id="textForm" class="text-form">
+        <textarea
+          id="textInput"
+          inputmode="text"
+          autocomplete="off"
+          autocapitalize="sentences"
+          spellcheck="true"
+          rows="1"
+          placeholder="Your phone keyboard now types into the selected PC window"
+        ></textarea>
+        <button id="sendText" type="submit">Send</button>
+      </form>
+    </section>
+
+    <section id="authPanel" class="auth-panel">
+      <form id="authForm" class="auth-card">
+        <h2>Connect your phone</h2>
+        <p>Enter the access code once on this phone browser. After that, it stays saved here.</p>
+        <input id="authToken" type="text" placeholder="ABCD-EFGH" autocomplete="one-time-code">
+        <button type="submit">Connect</button>
+      </form>
+    </section>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+  <script src="/assets/app.js?v=20260413j" defer></script>
+</body>
+</html>

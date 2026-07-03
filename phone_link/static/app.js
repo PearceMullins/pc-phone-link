@@ -8,6 +8,10 @@ const state = {
   windows: [],
   mouseSpeed: 2.5,
   tapMode: "left",
+  controlMode: "trackpad",
+  fitShape: "auto",
+  trustedDevices: [],
+  trustedDevicesLoading: false,
   phoneFitEnabled: false,
   phoneFitOrientation: null,
   phoneFitViewportSize: null,
@@ -16,6 +20,9 @@ const state = {
   pointerId: null,
   startClientPoint: null,
   lastClientPoint: null,
+  startSourcePoint: null,
+  lastSourcePoint: null,
+  directTouchDownSent: false,
   toastTimer: null,
   windowsRefreshTimer: null,
   hostReconnectTimer: null,
@@ -31,6 +38,7 @@ const state = {
   keyboardViewportOrientation: null,
   cameraScale: 1,
   cameraFocus: { x: 0.5, y: 0.5 },
+  cameraTranslate: { x: 0, y: 0 },
   cursorPosition: { x: 0.5, y: 0.5, visible: false },
   typingAnchor: null,
   messageHistory: [],
@@ -44,7 +52,15 @@ const state = {
   followTypingLogBuffer: [],
   followTypingLogTimer: null,
   followTypingLogFlushInFlight: false,
-  streamFps: 12,
+  streamFps: 20,
+  streamWidth: "auto",
+  streamRefreshTimer: null,
+  streamSocket: null,
+  streamGeneration: 0,
+  streamObjectUrl: null,
+  streamSocketFailures: 0,
+  streamParams: null,
+  streamFallbackActive: false,
   voiceRecognition: null,
   voiceListening: false,
   voiceStarting: false,
@@ -63,6 +79,11 @@ const FOLLOW_TYPING_LOG_BATCH_SIZE = 8;
 const FOLLOW_TYPING_LOG_FLUSH_DELAY_MS = 1200;
 const ACCESS_TOKEN_STORAGE_KEY = "pc-phone-link-token";
 const PAIRING_DEVICE_NAME_STORAGE_KEY = "pc-phone-link-pairing-device-name";
+const FIT_SHAPE_STORAGE_KEY = "pc-phone-link-fit-shape";
+const CONTROL_MODE_STORAGE_KEY = "pc-phone-link-control-mode";
+const STREAM_FPS_STORAGE_KEY = "pc-phone-link-stream-fps";
+const STREAM_WIDTH_STORAGE_KEY = "pc-phone-link-stream-width";
+const STREAM_WIDTH_OPTIONS = [1920, 1600, 1280, 960, 720, 480];
 const MESSAGE_HISTORY_STORAGE_KEY = "pc-phone-link-message-history";
 const MESSAGE_DRAFT_STORAGE_KEY = "pc-phone-link-message-draft";
 const MAX_MESSAGE_HISTORY = 100;
@@ -71,6 +92,31 @@ const KEYBOARD_VISIBLE_HEIGHT_DELTA = 140;
 const KEYBOARD_VISIBLE_HEIGHT_RATIO = 0.18;
 const SECONDARY_TAP_MAX_DISTANCE = 18;
 const SECONDARY_TAP_MAX_DURATION_MS = 320;
+const DIRECT_TOUCH_DRAG_THRESHOLD = 7;
+const MAX_CAMERA_SCALE = 6;
+const MAX_STREAM_FPS = 30;
+const DEFAULT_STREAM_FPS = 20;
+const MAX_STREAM_REQUEST_WIDTH = 1920;
+const MAX_STREAM_DEVICE_PIXEL_RATIO = 2.5;
+const STREAM_REFRESH_DEBOUNCE_MS = 180;
+const STREAM_SOCKET_MAX_FAILURES = 2;
+const STREAM_RECONNECT_DELAY_MS = 600;
+
+const POWER_ACTIONS = {
+  lock: { confirm: null, pending: "Locking the PC", done: "PC locked." },
+  sleep: { confirm: null, pending: "Putting the PC to sleep", done: "Sleep requested." },
+  restart: { confirm: "Restart the PC now?", pending: "Restarting the PC", done: "Restart requested." },
+  shutdown: { confirm: "Shut down the PC now?", pending: "Shutting down the PC", done: "Shutdown requested." },
+};
+
+const FIT_SHAPES = {
+  auto: { label: "Phone", aspect: null },
+  "16-9": { label: "16:9", aspect: 16 / 9 },
+  "16-10": { label: "16:10", aspect: 16 / 10 },
+  "4-3": { label: "4:3", aspect: 4 / 3 },
+  "1-1": { label: "Square", aspect: 1 },
+  "3-4": { label: "Tall", aspect: 3 / 4 },
+};
 
 const elements = {
   app: document.getElementById("app"),
@@ -83,9 +129,13 @@ const elements = {
   deviceName: document.getElementById("deviceName"),
   doubleClickMode: document.getElementById("doubleClickMode"),
   emptyState: document.getElementById("emptyState"),
+  applyFitShape: document.getElementById("applyFitShape"),
   fitToggle: document.getElementById("fitToggle"),
+  fitShape: document.getElementById("fitShape"),
+  fitShapeValue: document.getElementById("fitShapeValue"),
   focusWindow: document.getElementById("focusWindow"),
   followMouse: document.getElementById("followMouse"),
+  controlMode: document.getElementById("controlMode"),
   keyboardPanel: document.getElementById("keyboardPanel"),
   maximizeWindow: document.getElementById("maximizeWindow"),
   messageHistory: document.getElementById("messageHistory"),
@@ -94,7 +144,10 @@ const elements = {
   mouseSpeedValue: document.getElementById("mouseSpeedValue"),
   pairingDeviceName: document.getElementById("pairingDeviceName"),
   pairingStatus: document.getElementById("pairingStatus"),
+  powerMenu: document.getElementById("powerMenu"),
+  powerToggle: document.getElementById("powerToggle"),
   refreshWindows: document.getElementById("refreshWindows"),
+  refreshTrustedDevices: document.getElementById("refreshTrustedDevices"),
   remoteView: document.getElementById("remoteView"),
   requestPairing: document.getElementById("requestPairing"),
   restoreWindow: document.getElementById("restoreWindow"),
@@ -104,6 +157,10 @@ const elements = {
   selectedWindowTitle: document.getElementById("selectedWindowTitle"),
   sendText: document.getElementById("sendText"),
   statusPill: document.getElementById("statusPill"),
+  streamFps: document.getElementById("streamFps"),
+  streamFpsValue: document.getElementById("streamFpsValue"),
+  streamWidth: document.getElementById("streamWidth"),
+  streamWidthValue: document.getElementById("streamWidthValue"),
   textScale: document.getElementById("textScale"),
   textScaleValue: document.getElementById("textScaleValue"),
   textLarger: document.getElementById("textLarger"),
@@ -114,6 +171,8 @@ const elements = {
   toggleDrawer: document.getElementById("toggleDrawer"),
   toggleKeyboard: document.getElementById("toggleKeyboard"),
   touchLayer: document.getElementById("touchLayer"),
+  trustedDevices: document.getElementById("trustedDevices"),
+  trustedDevicesStatus: document.getElementById("trustedDevicesStatus"),
   toggleMessageHistory: document.getElementById("toggleMessageHistory"),
   viewerShell: document.getElementById("viewerShell"),
   voiceInput: document.getElementById("voiceInput"),
@@ -160,6 +219,126 @@ function getViewerFitSize() {
   };
 }
 
+function getSelectedFitShape() {
+  return FIT_SHAPES[state.fitShape] || FIT_SHAPES.auto;
+}
+
+function getPhoneFitRequestSize(viewerSize = getViewerFitSize()) {
+  const shape = getSelectedFitShape();
+  if (!shape.aspect) {
+    return viewerSize;
+  }
+
+  let width = Math.max(Math.round(viewerSize.width), 240);
+  let height = Math.max(Math.round(width / shape.aspect), 240);
+  const maxHeight = Math.max(Math.round(viewerSize.height), 240);
+  if (height > maxHeight) {
+    height = maxHeight;
+    width = Math.max(Math.round(height * shape.aspect), 240);
+  }
+
+  return { width, height };
+}
+
+function syncFitShapeControls() {
+  const shape = getSelectedFitShape();
+  if (elements.fitShape) {
+    elements.fitShape.value = state.fitShape;
+  }
+  if (elements.fitShapeValue) {
+    elements.fitShapeValue.textContent = shape.label;
+  }
+  if (elements.applyFitShape) {
+    const disabled = !state.selectedWindow || Boolean(state.selectedWindow?.is_desktop_capture);
+    elements.applyFitShape.disabled = disabled;
+  }
+}
+
+function setFitShape(value, { apply = false } = {}) {
+  state.fitShape = FIT_SHAPES[value] ? value : "auto";
+  window.localStorage.setItem(FIT_SHAPE_STORAGE_KEY, state.fitShape);
+  syncFitShapeControls();
+  if (apply && state.selectedWindow && !state.selectedWindow.is_desktop_capture) {
+    applyPhoneFit("fit-shape-change").catch((error) => showToast(error.message));
+  }
+}
+
+function syncControlMode() {
+  if (elements.controlMode) {
+    elements.controlMode.value = state.controlMode;
+  }
+  elements.viewerShell.classList.toggle("direct-touch-active", state.controlMode === "touch");
+  if (state.selectedWindow && elements.keyboardPanel.classList.contains("hidden")) {
+    elements.statusPill.textContent = getInputReadyStatus();
+  }
+}
+
+function setControlMode(value) {
+  state.controlMode = value === "touch" ? "touch" : "trackpad";
+  window.localStorage.setItem(CONTROL_MODE_STORAGE_KEY, state.controlMode);
+  syncControlMode();
+}
+
+function getInputReadyStatus() {
+  return state.controlMode === "touch" ? "Direct touch ready" : "Trackpad ready";
+}
+
+function clampStreamFps(value) {
+  const nextValue = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(nextValue)) {
+    return DEFAULT_STREAM_FPS;
+  }
+  return Math.max(1, Math.min(nextValue, MAX_STREAM_FPS));
+}
+
+function syncStreamFpsControl() {
+  if (elements.streamFps) {
+    elements.streamFps.value = String(state.streamFps);
+  }
+  if (elements.streamFpsValue) {
+    elements.streamFpsValue.textContent = `${state.streamFps} fps`;
+  }
+}
+
+function setStreamFps(value, { persist = false, refresh = false } = {}) {
+  state.streamFps = clampStreamFps(value);
+  if (persist) {
+    window.localStorage.setItem(STREAM_FPS_STORAGE_KEY, String(state.streamFps));
+  }
+  syncStreamFpsControl();
+  if (refresh) {
+    scheduleStreamRefresh(0);
+  }
+}
+
+function normalizeStreamWidth(value) {
+  if (value === null || value === undefined || value === "auto") {
+    return "auto";
+  }
+  const nextValue = Number.parseInt(String(value), 10);
+  return STREAM_WIDTH_OPTIONS.includes(nextValue) ? nextValue : "auto";
+}
+
+function syncStreamWidthControl() {
+  if (elements.streamWidth) {
+    elements.streamWidth.value = String(state.streamWidth);
+  }
+  if (elements.streamWidthValue) {
+    elements.streamWidthValue.textContent = state.streamWidth === "auto" ? "Auto" : `${state.streamWidth} px`;
+  }
+}
+
+function setStreamWidth(value, { persist = false, refresh = false } = {}) {
+  state.streamWidth = normalizeStreamWidth(value);
+  if (persist) {
+    window.localStorage.setItem(STREAM_WIDTH_STORAGE_KEY, String(state.streamWidth));
+  }
+  syncStreamWidthControl();
+  if (refresh) {
+    scheduleStreamRefresh(0);
+  }
+}
+
 function getViewportOrientation() {
   const { width, height } = getViewportSize();
   return width >= height ? "landscape" : "portrait";
@@ -193,11 +372,17 @@ function getDisplayedImageRect() {
   };
 }
 
-function viewerPointToSourceNormalized(clientX, clientY) {
+function viewerPointToSourceNormalized(clientX, clientY, { useCameraTransform = true } = {}) {
   const viewerRect = elements.viewerShell.getBoundingClientRect();
   const displayed = getDisplayedImageRect();
-  const localX = clientX - viewerRect.left;
-  const localY = clientY - viewerRect.top;
+  let localX = clientX - viewerRect.left;
+  let localY = clientY - viewerRect.top;
+
+  if (useCameraTransform && state.cameraScale > 1) {
+    localX = (localX - state.cameraTranslate.x) / state.cameraScale;
+    localY = (localY - state.cameraTranslate.y) / state.cameraScale;
+  }
+
   const normalizedX = (localX - displayed.left) / displayed.width;
   const normalizedY = (localY - displayed.top) / displayed.height;
 
@@ -215,9 +400,13 @@ function viewerPointToSourceNormalized(clientX, clientY) {
 }
 
 function setCameraScale(nextScale) {
-  const clampedScale = Math.max(1, Math.min(nextScale, 4));
+  const previousScale = state.cameraScale;
+  const clampedScale = Math.max(1, Math.min(nextScale, MAX_CAMERA_SCALE));
   state.cameraScale = clampedScale < 1.15 ? 1 : clampedScale;
   applyCameraTransform();
+  if (Math.abs(previousScale - state.cameraScale) >= 0.05) {
+    scheduleStreamRefresh();
+  }
 }
 
 function setCameraFocus(x, y) {
@@ -245,12 +434,14 @@ function getTypingMetrics() {
 
 function applyCameraTransform() {
   if (!state.selectedWindow) {
+    state.cameraTranslate = { x: 0, y: 0 };
     elements.remoteView.style.transformOrigin = "0 0";
     elements.remoteView.style.transform = "none";
     return;
   }
 
   if (state.cameraScale === 1) {
+    state.cameraTranslate = { x: 0, y: 0 };
     elements.remoteView.style.transformOrigin = "0 0";
     elements.remoteView.style.transform = "none";
     return;
@@ -274,17 +465,21 @@ function applyCameraTransform() {
   if (minTranslateX <= maxTranslateX) {
     translateX = Math.min(maxTranslateX, Math.max(minTranslateX, translateX));
   } else {
-    translateX = 0;
+    // Scaled content doesn't cover the viewer on this axis yet: keep it
+    // centered instead of pinning the element to the viewer origin, which
+    // pushed the letterboxed image off-center (fullscreen zoom stuck at top).
+    translateX = (viewerWidth / 2) - ((displayed.left + (displayed.width / 2)) * scale);
   }
 
   if (minTranslateY <= maxTranslateY) {
     translateY = Math.min(maxTranslateY, Math.max(minTranslateY, translateY));
   } else {
-    translateY = 0;
+    translateY = (viewerHeight / 2) - ((displayed.top + (displayed.height / 2)) * scale);
   }
 
   elements.remoteView.style.transformOrigin = "0 0";
   elements.remoteView.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+  state.cameraTranslate = { x: translateX, y: translateY };
 }
 
 function syncCameraToCursor() {
@@ -482,6 +677,7 @@ function buildPhoneFitLogDetails(extra = {}) {
     viewerShellWidth: Math.max(Math.round(viewerRect.width), 0),
     viewerShellHeight: Math.max(Math.round(viewerRect.height), 0),
     orientation: getViewportOrientation(),
+    fitShape: state.fitShape,
     fitButtonLabel: elements.fitToggle.textContent,
     phoneFitEnabled: state.phoneFitEnabled,
     keyboardOpen: !elements.keyboardPanel.classList.contains("hidden"),
@@ -585,10 +781,23 @@ function loadViewerPreferences() {
   state.followTyping = false;
   window.localStorage.removeItem("pc-phone-link-follow-typing");
   state.followMouse = window.localStorage.getItem("pc-phone-link-follow-mouse") === "true";
+  const savedFitShape = window.localStorage.getItem(FIT_SHAPE_STORAGE_KEY) || "auto";
+  state.fitShape = FIT_SHAPES[savedFitShape] ? savedFitShape : "auto";
+  const savedControlMode = window.localStorage.getItem(CONTROL_MODE_STORAGE_KEY) || "trackpad";
+  state.controlMode = savedControlMode === "touch" ? "touch" : "trackpad";
+  const savedStreamFps = Number.parseInt(window.localStorage.getItem(STREAM_FPS_STORAGE_KEY) || "", 10);
+  if (Number.isFinite(savedStreamFps)) {
+    state.streamFps = clampStreamFps(savedStreamFps);
+  }
+  state.streamWidth = normalizeStreamWidth(window.localStorage.getItem(STREAM_WIDTH_STORAGE_KEY));
 
   elements.mouseSpeed.value = String(state.mouseSpeed);
   elements.followMouse.checked = state.followMouse;
   updateMouseSpeedLabel();
+  syncFitShapeControls();
+  syncControlMode();
+  syncStreamFpsControl();
+  syncStreamWidthControl();
   syncTextScaleControl();
 }
 
@@ -901,12 +1110,16 @@ async function bootstrap({ quiet = false } = {}) {
   try {
     const info = await apiFetch("/api/info");
     elements.deviceName.textContent = info.device_name;
-    state.streamFps = Math.max(1, Math.min(Number(info.default_fps) || 12, 12));
+    if (!window.localStorage.getItem(STREAM_FPS_STORAGE_KEY)) {
+      state.streamFps = clampStreamFps(info.default_fps || state.streamFps);
+      syncStreamFpsControl();
+    }
     if (typeof info.text_scale === "number" && Number.isFinite(info.text_scale)) {
       setTextScaleValue(info.text_scale, { confirmed: true });
     }
-    elements.statusPill.textContent = "Trackpad ready";
+    elements.statusPill.textContent = getInputReadyStatus();
     await refreshWindows();
+    void refreshTrustedDevices({ quiet: true });
     scheduleWindowRefresh();
     clearHostReconnectPolling();
     return true;
@@ -927,6 +1140,137 @@ async function bootstrap({ quiet = false } = {}) {
     }
     return false;
   }
+}
+
+function formatTrustedDeviceTime(value) {
+  if (!value) {
+    return "Never";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function renderTrustedDevices() {
+  if (!elements.trustedDevices || !elements.trustedDevicesStatus) {
+    return;
+  }
+
+  elements.trustedDevices.innerHTML = "";
+  if (state.trustedDevicesLoading) {
+    elements.trustedDevicesStatus.textContent = "Loading saved phones.";
+    return;
+  }
+
+  if (!state.token) {
+    elements.trustedDevicesStatus.textContent = "Pair this phone to load saved phones.";
+    return;
+  }
+
+  if (!state.trustedDevices.length) {
+    elements.trustedDevicesStatus.textContent = "No saved phones found.";
+    return;
+  }
+
+  elements.trustedDevicesStatus.textContent = `${state.trustedDevices.length} saved phone${state.trustedDevices.length === 1 ? "" : "s"}.`;
+
+  for (const device of state.trustedDevices) {
+    const card = document.createElement("article");
+    card.className = "trusted-device-card";
+    if (device.is_current) {
+      card.classList.add("current");
+    }
+
+    const title = document.createElement("div");
+    title.className = "trusted-device-title";
+    const name = document.createElement("strong");
+    name.textContent = device.device_name || "This phone";
+    title.append(name);
+    if (device.is_current) {
+      const current = document.createElement("span");
+      current.textContent = "Current";
+      title.append(current);
+    }
+    card.append(title);
+
+    const meta = document.createElement("p");
+    meta.className = "trusted-device-meta";
+    meta.textContent = `Approved ${formatTrustedDeviceTime(device.approved_at)}. Last seen ${formatTrustedDeviceTime(device.last_seen_at)}.`;
+    card.append(meta);
+
+    const revokeButton = document.createElement("button");
+    revokeButton.type = "button";
+    revokeButton.className = "ghost-button";
+    revokeButton.textContent = device.is_current ? "Delete this phone" : "Delete";
+    revokeButton.addEventListener("click", () => deleteTrustedDevice(device));
+    card.append(revokeButton);
+
+    elements.trustedDevices.append(card);
+  }
+}
+
+async function refreshTrustedDevices({ quiet = false } = {}) {
+  if (!state.token) {
+    state.trustedDevices = [];
+    renderTrustedDevices();
+    return;
+  }
+
+  state.trustedDevicesLoading = true;
+  renderTrustedDevices();
+  try {
+    const response = await apiFetch("/api/trusted-devices");
+    state.trustedDevices = Array.isArray(response.devices) ? response.devices : [];
+  } catch (error) {
+    if (!quiet) {
+      showToast(error.message || "Saved phones could not load.");
+    }
+  } finally {
+    state.trustedDevicesLoading = false;
+    renderTrustedDevices();
+  }
+}
+
+async function deleteTrustedDevice(device) {
+  if (!device?.id) {
+    return;
+  }
+
+  const prompt = device.is_current
+    ? "Delete this saved phone connection? You will need to pair again."
+    : `Delete ${device.device_name || "this phone"} from saved phones?`;
+  if (!window.confirm(prompt)) {
+    return;
+  }
+
+  const response = await apiFetch(`/api/trusted-devices/${encodeURIComponent(device.id)}`, {
+    method: "DELETE",
+  });
+  if (response.revoked_current) {
+    state.token = null;
+    state.selectedWindow = null;
+    state.windows = [];
+    state.phoneFitEnabled = false;
+    state.phoneFitOrientation = null;
+    state.phoneFitViewportSize = null;
+    state.trustedDevices = [];
+    window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+    elements.authPanel.classList.remove("hidden");
+    clearPairingRequest({ message: "That saved connection was deleted. Pair this phone again to reconnect." });
+    renderTrustedDevices();
+    resetViewer();
+    return;
+  }
+
+  await refreshTrustedDevices({ quiet: true });
+  showToast("Saved phone deleted.");
 }
 
 function scheduleWindowRefresh() {
@@ -1029,13 +1373,14 @@ function updateSelectedWindow(windowInfo) {
   state.selectedWindow = windowInfo;
   state.phoneFitEnabled = Boolean(windowInfo.is_phone_fit);
   state.phoneFitOrientation = state.phoneFitEnabled ? getViewportOrientation() : null;
-  state.phoneFitViewportSize = state.phoneFitEnabled ? getViewerFitSize() : null;
+  state.phoneFitViewportSize = state.phoneFitEnabled ? getPhoneFitRequestSize(getViewerFitSize()) : null;
   if (windowInfo.cursor) {
     updateCursorPosition(windowInfo.cursor, { allowMouseFollow: true });
   }
   elements.selectedWindowTitle.textContent = windowInfo.title;
   syncPhoneFitButton();
   syncTargetActionButtons();
+  syncControlMode();
   renderWindowList();
   applyCameraTransform();
 }
@@ -1054,6 +1399,7 @@ function syncTargetActionButtons() {
   if (elements.toggleKeyboard) {
     elements.toggleKeyboard.disabled = !hasTarget;
   }
+  syncFitShapeControls();
 }
 
 async function refreshWindows() {
@@ -1123,6 +1469,7 @@ function renderWindowList() {
 }
 
 async function selectWindow(windowInfo) {
+  state.streamSocketFailures = 0;
   updateSelectedWindow(windowInfo);
   elements.emptyState.hidden = true;
   elements.remoteView.style.display = "block";
@@ -1135,26 +1482,194 @@ async function selectWindow(windowInfo) {
   closeDrawerOnSmallScreens();
 }
 
+function getStreamRequestWidth() {
+  if (state.streamWidth !== "auto") {
+    return Math.min(Math.max(state.streamWidth, 360), MAX_STREAM_REQUEST_WIDTH);
+  }
+  const viewerRect = elements.viewerShell.getBoundingClientRect();
+  const displayed = getDisplayedImageRect();
+  const devicePixelRatio = Math.min(Math.max(window.devicePixelRatio || 1, 1), MAX_STREAM_DEVICE_PIXEL_RATIO);
+  const zoomScale = Math.max(state.cameraScale || 1, 1);
+  const visibleWidth = Math.max(displayed.width || 0, viewerRect.width || 0, 1);
+  const requestedWidth = Math.round(visibleWidth * devicePixelRatio * zoomScale);
+  return Math.min(Math.max(requestedWidth, 360), MAX_STREAM_REQUEST_WIDTH);
+}
+
+function scheduleStreamRefresh(delay = STREAM_REFRESH_DEBOUNCE_MS) {
+  if (!state.selectedWindow) {
+    return;
+  }
+
+  if (state.streamRefreshTimer) {
+    window.clearTimeout(state.streamRefreshTimer);
+  }
+  state.streamRefreshTimer = window.setTimeout(() => {
+    state.streamRefreshTimer = null;
+    refreshStream();
+  }, delay);
+}
+
+function getStreamParams() {
+  return {
+    hwnd: state.selectedWindow.hwnd,
+    width: getStreamRequestWidth(),
+    fps: clampStreamFps(state.streamFps),
+  };
+}
+
+function streamParamsEqual(a, b) {
+  return Boolean(a && b) && a.hwnd === b.hwnd && a.width === b.width && a.fps === b.fps;
+}
+
+function releaseStreamObjectUrl() {
+  if (state.streamObjectUrl) {
+    URL.revokeObjectURL(state.streamObjectUrl);
+    state.streamObjectUrl = null;
+  }
+}
+
+function closeStreamSocket() {
+  state.streamGeneration += 1;
+  const socket = state.streamSocket;
+  state.streamSocket = null;
+  if (!socket) {
+    return;
+  }
+  socket.onopen = null;
+  socket.onmessage = null;
+  socket.onerror = null;
+  socket.onclose = null;
+  try {
+    socket.close();
+  } catch {
+    // Sockets that never finished connecting can throw on close; ignore.
+  }
+}
+
 function refreshStream() {
   if (!state.selectedWindow) {
     return;
   }
 
-  const viewerRect = elements.viewerShell.getBoundingClientRect();
-  const devicePixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
-  const width = Math.min(Math.max(Math.round(viewerRect.width * devicePixelRatio), 360), 680);
-  const fps = Math.max(1, Math.min(state.streamFps || 12, 12));
-  const streamUrl = `/api/windows/${state.selectedWindow.hwnd}/stream?token=${encodeURIComponent(state.token)}&width=${width}&fps=${fps}&t=${Date.now()}`;
+  if (state.streamRefreshTimer) {
+    window.clearTimeout(state.streamRefreshTimer);
+    state.streamRefreshTimer = null;
+  }
+
+  const params = getStreamParams();
+  const socketAlive = state.streamSocket
+    && (state.streamSocket.readyState === WebSocket.OPEN
+      || state.streamSocket.readyState === WebSocket.CONNECTING);
+  if (streamParamsEqual(state.streamParams, params) && (socketAlive || state.streamFallbackActive)) {
+    applyCameraTransform();
+    return;
+  }
+
+  state.streamParams = params;
+  closeStreamSocket();
+  if (state.streamSocketFailures >= STREAM_SOCKET_MAX_FAILURES) {
+    startMjpegFallback(params);
+    return;
+  }
+  openStreamSocket(params);
+  applyCameraTransform();
+}
+
+function openStreamSocket(params) {
+  const generation = state.streamGeneration;
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const socketUrl = `${protocol}://${window.location.host}/ws/stream`
+    + `?token=${encodeURIComponent(state.token || "")}`
+    + `&hwnd=${params.hwnd}&width=${params.width}&fps=${params.fps}`;
+
+  let socket;
+  try {
+    socket = new WebSocket(socketUrl);
+  } catch {
+    state.streamSocketFailures += 1;
+    startMjpegFallback(params);
+    return;
+  }
+
+  socket.binaryType = "blob";
+  state.streamSocket = socket;
+  state.streamFallbackActive = false;
+  let receivedFrame = false;
+
+  socket.onmessage = (event) => {
+    if (state.streamGeneration !== generation || !(event.data instanceof Blob)) {
+      return;
+    }
+    if (!receivedFrame) {
+      receivedFrame = true;
+      state.streamSocketFailures = 0;
+    }
+    renderSocketFrame(event.data, socket, generation);
+  };
+
+  socket.onclose = () => {
+    if (state.streamGeneration !== generation) {
+      return;
+    }
+    state.streamSocket = null;
+    if (!receivedFrame) {
+      // The socket never delivered a frame: fall back to MJPEG right away.
+      state.streamSocketFailures += 1;
+      startMjpegFallback(params);
+      return;
+    }
+    scheduleStreamRefresh(STREAM_RECONNECT_DELAY_MS);
+  };
+}
+
+async function renderSocketFrame(frameBlob, socket, generation) {
+  const objectUrl = URL.createObjectURL(frameBlob);
+  const previousUrl = state.streamObjectUrl;
+  state.streamObjectUrl = objectUrl;
+  elements.remoteView.src = objectUrl;
+  try {
+    if (typeof elements.remoteView.decode === "function") {
+      await elements.remoteView.decode();
+    }
+  } catch {
+    // Decode fails when a newer source replaced this frame; keep streaming.
+  }
+  if (previousUrl) {
+    URL.revokeObjectURL(previousUrl);
+  }
+  // Acknowledge only after the frame is decoded so the host adapts its pace
+  // to what this phone can actually display, instead of queueing stale frames.
+  if (state.streamGeneration === generation && socket.readyState === WebSocket.OPEN) {
+    socket.send("r");
+  }
+}
+
+function startMjpegFallback(params) {
+  if (!state.selectedWindow) {
+    return;
+  }
+  state.streamFallbackActive = true;
+  releaseStreamObjectUrl();
+  const streamUrl = `/api/windows/${params.hwnd}/stream?token=${encodeURIComponent(state.token)}`
+    + `&width=${params.width}&fps=${params.fps}&t=${Date.now()}`;
   elements.remoteView.src = streamUrl;
   applyCameraTransform();
 }
 
 function resetViewer() {
   elements.selectedWindowTitle.textContent = "Open Windows to choose an app or fullscreen view";
+  closeStreamSocket();
+  releaseStreamObjectUrl();
+  state.streamParams = null;
+  state.streamFallbackActive = false;
   elements.remoteView.removeAttribute("src");
   elements.remoteView.style.display = "none";
   elements.emptyState.hidden = false;
   state.typingAnchor = null;
+  if (state.streamRefreshTimer) {
+    window.clearTimeout(state.streamRefreshTimer);
+    state.streamRefreshTimer = null;
+  }
   closeKeyboardCapture();
   syncPhoneFitButton();
   syncTargetActionButtons();
@@ -1235,7 +1750,7 @@ function closeKeyboardCapture({ blurInput = true } = {}) {
     queueFollowTypingLog("keyboard-close", buildFollowTypingLogDetails(), { immediate: true });
   }
   state.typingAnchor = null;
-  elements.statusPill.textContent = state.selectedWindow ? "Trackpad ready" : "Ready";
+  elements.statusPill.textContent = state.selectedWindow ? getInputReadyStatus() : "Ready";
 }
 
 function toggleKeyboardPanel() {
@@ -1472,7 +1987,7 @@ function ensureVoiceRecognition() {
     state.voiceBaseText = elements.textInput.value;
     syncVoiceInputButton();
     elements.statusPill.textContent = elements.keyboardPanel.classList.contains("hidden")
-      ? (state.selectedWindow ? "Trackpad ready" : "Ready")
+      ? (state.selectedWindow ? getInputReadyStatus() : "Ready")
       : "Keyboard ready";
   };
 
@@ -1571,8 +2086,8 @@ function sendPointer(action, payload = {}) {
 
   const requestPayload = {
     action,
-    x: 0.5,
-    y: 0.5,
+    x: Number.isFinite(payload.x) ? payload.x : 0.5,
+    y: Number.isFinite(payload.y) ? payload.y : 0.5,
     delta: payload.delta || 0,
     delta_x: payload.deltaX || 0,
     delta_y: payload.deltaY || 0,
@@ -1604,6 +2119,36 @@ function clearSecondaryTapGesture() {
   state.secondaryTapGesture = null;
 }
 
+function resetPrimaryPointerState() {
+  state.pointerDown = false;
+  state.dragActive = false;
+  state.pointerId = null;
+  state.startClientPoint = null;
+  state.lastClientPoint = null;
+  state.startSourcePoint = null;
+  state.lastSourcePoint = null;
+  state.directTouchDownSent = false;
+  state.suppressPrimaryTapUp = false;
+}
+
+function getDirectTouchPoint(event) {
+  return viewerPointToSourceNormalized(event.clientX, event.clientY)
+    || state.lastSourcePoint
+    || state.startSourcePoint;
+}
+
+function sendTapActionAtPoint(point) {
+  if (!point) {
+    return;
+  }
+  const action = state.tapMode === "double"
+    ? "double"
+    : state.tapMode === "right"
+      ? "right_tap"
+      : "tap";
+  sendPointer(action, point);
+}
+
 function startPinchGesture() {
   const points = Array.from(state.activePointers.values());
   if (points.length < 2) {
@@ -1623,11 +2168,7 @@ function startPinchGesture() {
     elements.touchLayer.releasePointerCapture(state.pointerId);
   }
 
-  state.pointerDown = false;
-  state.dragActive = false;
-  state.pointerId = null;
-  state.startClientPoint = null;
-  state.lastClientPoint = null;
+  resetPrimaryPointerState();
   setCameraFocus(state.pinchState.startFocus.x, state.pinchState.startFocus.y);
 }
 
@@ -1660,6 +2201,7 @@ function handlePointerDown(event) {
         pointerId: event.pointerId,
         primaryStartX: primaryPoint.x,
         primaryStartY: primaryPoint.y,
+        primarySourcePoint: state.lastSourcePoint || state.startSourcePoint,
         startX: event.clientX,
         startY: event.clientY,
         startedAt: Date.now(),
@@ -1689,6 +2231,9 @@ function handlePointerDown(event) {
     x: event.clientX,
     y: event.clientY,
   };
+  state.startSourcePoint = viewerPointToSourceNormalized(event.clientX, event.clientY);
+  state.lastSourcePoint = state.startSourcePoint;
+  state.directTouchDownSent = false;
   elements.touchLayer.setPointerCapture(event.pointerId);
 }
 
@@ -1760,7 +2305,8 @@ function handlePointerMove(event) {
     return;
   }
 
-  if (!state.dragActive && (totalDeltaX > 4 || totalDeltaY > 4)) {
+  const dragThreshold = state.controlMode === "touch" ? DIRECT_TOUCH_DRAG_THRESHOLD : 4;
+  if (!state.dragActive && (totalDeltaX > dragThreshold || totalDeltaY > dragThreshold)) {
     state.dragActive = true;
   }
 
@@ -1768,6 +2314,23 @@ function handlePointerMove(event) {
     x: event.clientX,
     y: event.clientY,
   };
+
+  if (state.controlMode === "touch") {
+    const point = getDirectTouchPoint(event);
+    if (!point) {
+      return;
+    }
+    state.lastSourcePoint = point;
+    if (!state.directTouchDownSent && (totalDeltaX > DIRECT_TOUCH_DRAG_THRESHOLD || totalDeltaY > DIRECT_TOUCH_DRAG_THRESHOLD)) {
+      sendPointer("down", state.startSourcePoint || point);
+      state.directTouchDownSent = true;
+    }
+    if (state.directTouchDownSent) {
+      sendPointer("move", point);
+    }
+    return;
+  }
+
   sendPointer("move_relative", {
     deltaX: deltaX * state.mouseSpeed * TRACKPAD_BASE_SPEED,
     deltaY: deltaY * state.mouseSpeed * TRACKPAD_BASE_SPEED,
@@ -1805,7 +2368,11 @@ function handlePointerUp(event) {
       && primaryMovement <= SECONDARY_TAP_MAX_DISTANCE
       && secondaryMovement <= SECONDARY_TAP_MAX_DISTANCE
     ) {
-      sendPointer("right_click_current");
+      if (state.controlMode === "touch" && secondaryTapGesture.primarySourcePoint) {
+        sendPointer("right_tap", secondaryTapGesture.primarySourcePoint);
+      } else {
+        sendPointer("right_click_current");
+      }
     }
     return;
   }
@@ -1833,6 +2400,32 @@ function handlePointerUp(event) {
   event.preventDefault();
   const didDrag = state.dragActive || state.suppressPrimaryTapUp;
 
+  if (state.controlMode === "touch") {
+    const point = getDirectTouchPoint(event);
+    if (point) {
+      state.lastSourcePoint = point;
+    }
+    if (state.directTouchDownSent) {
+      const releasePoint = point || state.lastSourcePoint || state.startSourcePoint;
+      if (releasePoint) {
+        sendPointer("up", releasePoint);
+      }
+    } else if (!didDrag) {
+      sendTapActionAtPoint(point);
+    }
+
+    if (state.tapMode !== "left") {
+      setTapMode("left");
+    }
+
+    if (elements.touchLayer.hasPointerCapture(event.pointerId)) {
+      elements.touchLayer.releasePointerCapture(event.pointerId);
+    }
+
+    resetPrimaryPointerState();
+    return;
+  }
+
   if (!didDrag) {
     const action = state.tapMode === "double"
       ? "double_current"
@@ -1850,12 +2443,7 @@ function handlePointerUp(event) {
     elements.touchLayer.releasePointerCapture(event.pointerId);
   }
 
-  state.pointerDown = false;
-  state.dragActive = false;
-  state.pointerId = null;
-  state.startClientPoint = null;
-  state.lastClientPoint = null;
-  state.suppressPrimaryTapUp = false;
+  resetPrimaryPointerState();
 }
 
 function handlePointerCancel(event) {
@@ -1879,12 +2467,7 @@ function handlePointerCancel(event) {
     elements.touchLayer.releasePointerCapture(event.pointerId);
   }
 
-  state.pointerDown = false;
-  state.dragActive = false;
-  state.pointerId = null;
-  state.startClientPoint = null;
-  state.lastClientPoint = null;
-  state.suppressPrimaryTapUp = false;
+  resetPrimaryPointerState();
 }
 
 async function focusSelectedWindow(maximize = false) {
@@ -1954,13 +2537,16 @@ async function applyPhoneFit(trigger = "manual") {
   }
 
   const viewerSize = getViewerFitSize();
+  const requestSize = getPhoneFitRequestSize(viewerSize);
   writeClientLog(
     "phone-fit",
     "phone-fit-request",
     buildPhoneFitLogDetails({
       trigger,
-      requestedViewportWidth: viewerSize.width,
-      requestedViewportHeight: viewerSize.height,
+      viewerWidth: viewerSize.width,
+      viewerHeight: viewerSize.height,
+      requestedViewportWidth: requestSize.width,
+      requestedViewportHeight: requestSize.height,
     }),
   );
   let response;
@@ -1968,8 +2554,8 @@ async function applyPhoneFit(trigger = "manual") {
     response = await apiFetch(`/api/windows/${state.selectedWindow.hwnd}/phone-fit`, {
       method: "POST",
       body: JSON.stringify({
-        viewport_width: viewerSize.width,
-        viewport_height: viewerSize.height,
+        viewport_width: requestSize.width,
+        viewport_height: requestSize.height,
       }),
     });
   } catch (error) {
@@ -1978,8 +2564,10 @@ async function applyPhoneFit(trigger = "manual") {
       "phone-fit-error",
       buildPhoneFitLogDetails({
         trigger,
-        requestedViewportWidth: viewerSize.width,
-        requestedViewportHeight: viewerSize.height,
+        viewerWidth: viewerSize.width,
+        viewerHeight: viewerSize.height,
+        requestedViewportWidth: requestSize.width,
+        requestedViewportHeight: requestSize.height,
         error: error.message,
       }),
     );
@@ -1991,14 +2579,16 @@ async function applyPhoneFit(trigger = "manual") {
     "phone-fit-response",
     buildPhoneFitLogDetails({
       trigger,
-      requestedViewportWidth: viewerSize.width,
-      requestedViewportHeight: viewerSize.height,
+        viewerWidth: viewerSize.width,
+        viewerHeight: viewerSize.height,
+        requestedViewportWidth: requestSize.width,
+        requestedViewportHeight: requestSize.height,
       responseWindow: summarizeWindowForLog(response.window || state.selectedWindow),
     }),
   );
   state.phoneFitEnabled = true;
   state.phoneFitOrientation = getViewportOrientation();
-  state.phoneFitViewportSize = viewerSize;
+  state.phoneFitViewportSize = requestSize;
   syncPhoneFitButton();
   refreshStream();
 }
@@ -2008,7 +2598,7 @@ function scheduleAutoPhoneFit(trigger = "viewport-change") {
     return;
   }
 
-  const nextViewerSize = getViewerFitSize();
+  const nextViewerSize = getPhoneFitRequestSize(getViewerFitSize());
   const previousViewerSize = state.phoneFitViewportSize;
   const orientationChanged = getViewportOrientation() !== state.phoneFitOrientation;
   const sizeChanged = !previousViewerSize
@@ -2151,6 +2741,36 @@ function sendWheel(delta) {
   sendPointer("wheel_current", { delta });
 }
 
+function togglePowerMenu(force) {
+  if (!elements.powerMenu) {
+    return;
+  }
+  const shouldShow = typeof force === "boolean" ? force : elements.powerMenu.classList.contains("hidden");
+  elements.powerMenu.classList.toggle("hidden", !shouldShow);
+}
+
+async function requestPowerAction(action) {
+  const config = POWER_ACTIONS[action];
+  if (!config) {
+    return;
+  }
+  togglePowerMenu(false);
+  if (config.confirm && !window.confirm(config.confirm)) {
+    return;
+  }
+  const previousStatus = elements.statusPill.textContent;
+  elements.statusPill.textContent = config.pending;
+  try {
+    await apiFetch("/api/system/power", {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+  } finally {
+    elements.statusPill.textContent = previousStatus;
+  }
+  showToast(config.done);
+}
+
 function handleTextInput() {
   saveMessageDraft();
   autoResizeTextInput();
@@ -2236,6 +2856,30 @@ elements.mouseSpeed.addEventListener("input", (event) => {
   window.localStorage.setItem("pc-phone-link-mouse-speed", String(state.mouseSpeed));
   updateMouseSpeedLabel();
 });
+if (elements.streamFps) {
+  elements.streamFps.addEventListener("input", (event) => setStreamFps(event.target.value, { persist: true }));
+  elements.streamFps.addEventListener("change", (event) => setStreamFps(event.target.value, { persist: true, refresh: true }));
+}
+if (elements.streamWidth) {
+  elements.streamWidth.addEventListener("change", (event) => setStreamWidth(event.target.value, { persist: true, refresh: true }));
+}
+if (elements.powerToggle && elements.powerMenu) {
+  elements.powerToggle.addEventListener("click", () => togglePowerMenu());
+  elements.powerMenu.querySelectorAll("[data-power-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      requestPowerAction(button.dataset.powerAction).catch((error) => showToast(error.message));
+    });
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (elements.powerMenu.classList.contains("hidden")) {
+      return;
+    }
+    if (elements.powerMenu.contains(event.target) || elements.powerToggle.contains(event.target)) {
+      return;
+    }
+    togglePowerMenu(false);
+  });
+}
 elements.textScale.addEventListener("input", (event) => {
   scheduleTextScaleApply(event.target.value);
 });
@@ -2243,6 +2887,12 @@ elements.textScale.addEventListener("change", (event) => {
   scheduleTextScaleApply(event.target.value, 0, { showSuccessToast: true });
 });
 elements.applyTextScale.addEventListener("click", () => applySelectedTextScale().catch((error) => showToast(error.message)));
+elements.fitShape.addEventListener("change", (event) => {
+  setFitShape(event.target.value, { apply: state.phoneFitEnabled });
+});
+elements.applyFitShape.addEventListener("click", () => applyPhoneFit("shape-button").catch((error) => showToast(error.message)));
+elements.controlMode.addEventListener("change", (event) => setControlMode(event.target.value));
+elements.refreshTrustedDevices.addEventListener("click", () => refreshTrustedDevices().catch((error) => showToast(error.message)));
 elements.followMouse.addEventListener("change", (event) => {
   state.followMouse = event.target.checked;
   window.localStorage.setItem("pc-phone-link-follow-mouse", String(state.followMouse));
@@ -2317,6 +2967,7 @@ syncVoiceInputButton();
 loadViewerPreferences();
 loadMessageComposerState();
 loadSavedToken();
+renderTrustedDevices();
 if (elements.controlBar) {
   elements.controlBar.hidden = false;
 }

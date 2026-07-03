@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>PC Phone Link</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=20260413g">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260702b">
 </head>
 <body>
   <div id="app">
@@ -31,6 +31,32 @@
           step="0.1"
           value="2.5"
         >
+        <label class="setting-label" for="streamFps">
+          <span>Frame rate</span>
+          <strong id="streamFpsValue">20 fps</strong>
+        </label>
+        <input
+          id="streamFps"
+          class="speed-slider"
+          type="range"
+          min="1"
+          max="30"
+          step="1"
+          value="20"
+        >
+        <label class="setting-label" for="streamWidth">
+          <span>Resolution</span>
+          <strong id="streamWidthValue">Auto</strong>
+        </label>
+        <select id="streamWidth" class="setting-select">
+          <option value="auto">Auto (fit phone)</option>
+          <option value="1920">1920 px (sharpest)</option>
+          <option value="1600">1600 px</option>
+          <option value="1280">1280 px</option>
+          <option value="960">960 px</option>
+          <option value="720">720 px</option>
+          <option value="480">480 px (fastest)</option>
+        </select>
         <label class="toggle-setting" for="followMouse">
           <span>Follow mouse</span>
           <input id="followMouse" type="checkbox">
@@ -49,6 +75,46 @@
           value="100"
         >
         <button id="applyTextScale" class="ghost-button" type="button" disabled>Apply text size</button>
+        <div class="drawer-button-row">
+          <button id="textSmaller" class="ghost-button" type="button">Smaller</button>
+          <button id="textLarger" class="ghost-button" type="button">Larger</button>
+        </div>
+        <label class="setting-label" for="fitShape">
+          <span>Screen shape</span>
+          <strong id="fitShapeValue">Phone</strong>
+        </label>
+        <select id="fitShape" class="setting-select">
+          <option value="auto">Phone</option>
+          <option value="16-9">16:9</option>
+          <option value="16-10">16:10</option>
+          <option value="4-3">4:3</option>
+          <option value="1-1">Square</option>
+          <option value="3-4">Tall</option>
+        </select>
+        <button id="applyFitShape" class="ghost-button" type="button" disabled>Apply shape</button>
+        <label class="setting-label" for="controlMode">
+          <span>Screen tapping</span>
+        </label>
+        <select id="controlMode" class="setting-select">
+          <option value="trackpad">Trackpad</option>
+          <option value="touch">Direct touch</option>
+        </select>
+        <div class="drawer-button-row">
+          <button id="rightClickMode" class="ghost-button" type="button">Right click</button>
+          <button id="doubleClickMode" class="ghost-button" type="button">Double click</button>
+        </div>
+        <div class="drawer-button-row">
+          <button id="scrollUp" class="ghost-button" type="button">Scroll up</button>
+          <button id="scrollDown" class="ghost-button" type="button">Scroll down</button>
+        </div>
+        <section class="trusted-devices-section">
+          <div class="trusted-devices-header">
+            <span>Trusted phones</span>
+            <button id="refreshTrustedDevices" class="ghost-button compact-button" type="button">Refresh</button>
+          </div>
+          <p id="trustedDevicesStatus" class="trusted-devices-status">No saved phones loaded.</p>
+          <div id="trustedDevices" class="trusted-devices-list"></div>
+        </section>
       </section>
     </aside>
 
@@ -59,8 +125,15 @@
         <strong id="selectedWindowTitle">Open Windows to choose an app or fullscreen view</strong>
       </div>
       <div class="topbar-actions">
+        <button id="powerToggle" class="ghost-button" type="button">Power</button>
         <button id="fitToggle" class="ghost-button" type="button">Fit</button>
         <button id="toggleKeyboard" class="ghost-button" type="button">Keyboard</button>
+        <div id="powerMenu" class="power-menu hidden">
+          <button type="button" class="power-menu-item" data-power-action="lock">Lock</button>
+          <button type="button" class="power-menu-item" data-power-action="sleep">Sleep</button>
+          <button type="button" class="power-menu-item" data-power-action="restart">Restart</button>
+          <button type="button" class="power-menu-item power-menu-danger" data-power-action="shutdown">Shut down</button>
+        </div>
       </div>
     </header>
 
@@ -110,6 +183,6 @@
 
     <div id="toast" class="toast hidden"></div>
   </div>
-  <script src="/assets/app.js?v=20260413w" defer></script>
+  <script src="/assets/app.js?v=20260702b" defer></script>
 </body>
 </html>

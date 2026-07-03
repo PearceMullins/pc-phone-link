@@ -408,7 +408,7 @@ def capture_window(hwnd: int, target_width: int | None = None) -> Image.Image:
         image = _capture_fullscreen()
         if target_width and target_width > 0 and image.width > target_width:
             target_height = max(int(image.height * (target_width / image.width)), 1)
-            image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
+            image = image.resize((target_width, target_height), Image.Resampling.BILINEAR)
         return image
 
     ensured = _ensure_window(hwnd)
@@ -424,14 +424,16 @@ def capture_window(hwnd: int, target_width: int | None = None) -> Image.Image:
 
     if target_width and target_width > 0 and image.width > target_width:
         target_height = max(int(image.height * (target_width / image.width)), 1)
-        image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        image = image.resize((target_width, target_height), Image.Resampling.BILINEAR)
 
     return image
 
 
-def encode_jpeg(image: Image.Image, quality: int = 42) -> bytes:
+def encode_jpeg(image: Image.Image, quality: int = 65) -> bytes:
     buffer = io.BytesIO()
-    image.save(buffer, format="JPEG", quality=quality)
+    # 4:2:0 chroma subsampling: much smaller/faster than 4:4:4 with little
+    # visible difference for a live screen stream.
+    image.save(buffer, format="JPEG", quality=quality, subsampling=2)
     return buffer.getvalue()
 
 

@@ -19,7 +19,7 @@ def install_startup_shortcut(
     launcher_port: int = 8764,
     target_host: str = "0.0.0.0",
     target_port: int = 8765,
-    default_fps: int = 12,
+    default_fps: int = 20,
     wake_relay_url: str | None = None,
     startup_dir: Path | None = None,
 ) -> Path:

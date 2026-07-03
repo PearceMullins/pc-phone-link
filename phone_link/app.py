@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import ctypes
 import secrets
 import socket
@@ -15,19 +16,24 @@ from typing import Any
 import pywintypes
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .host_access import load_paired_browsers, register_paired_browser, resolve_access_token
+from .host_access import (
+    load_paired_browsers,
+    register_paired_browser,
+    resolve_access_token,
+    save_paired_browsers,
+    touch_paired_browser,
+)
 from .logging_utils import log_event, summarize_http_request, summarize_websocket
 from .network import discover_access_urls
+from .streaming import MAX_STREAM_FPS, register_stream_routes
 from .windows_host import (
     FULLSCREEN_TARGET_HWND,
     WindowLookupError,
     adjust_system_text_size,
-    capture_window,
-    encode_jpeg,
     fit_window_to_viewport,
     focus_window,
     get_system_text_scale,
@@ -36,7 +42,6 @@ from .windows_host import (
     list_windows,
     maximize_window,
     press_special_key,
-    render_placeholder_frame,
     restore_window,
     send_text,
     window_to_dict,
@@ -97,12 +102,12 @@ class ClientLogRequest(BaseModel):
     entries: list[ClientLogEntry] = Field(default_factory=list)
 
 
-def create_app(access_token: str, default_fps: int = 12, wake_relay_url: str | None = None) -> FastAPI:
+def create_app(access_token: str, default_fps: int = 20, wake_relay_url: str | None = None) -> FastAPI:
     app = FastAPI(title="PC Phone Link", docs_url=None, redoc_url=None)
     app.state.access_token = access_token
     app.state.paired_browsers = load_paired_browsers()
     app.state.pending_pairings = {}
-    app.state.default_fps = max(1, min(default_fps, 12))
+    app.state.default_fps = max(1, min(default_fps, MAX_STREAM_FPS))
     app.state.wake_relay_url = _normalize_wake_relay_url(wake_relay_url)
 
     @app.on_event("startup")
@@ -222,6 +227,54 @@ def create_app(access_token: str, default_fps: int = 12, wake_relay_url: str | N
             "wake_relay_url": app.state.wake_relay_url,
             "wake_relay_configured": bool(app.state.wake_relay_url),
         }
+
+    @app.get("/api/trusted-devices")
+    async def trusted_devices(request: Request) -> dict[str, Any]:
+        current_token = _require_token(app, request)
+        app.state.paired_browsers = load_paired_browsers()
+        return {
+            "devices": [
+                _serialize_trusted_device(entry, current_token)
+                for entry in app.state.paired_browsers
+            ]
+        }
+
+    @app.delete("/api/trusted-devices/{device_id}")
+    async def delete_trusted_device(device_id: str, request: Request) -> dict[str, Any]:
+        current_token = _require_token(app, request)
+        normalized_device_id = (device_id or "").strip().lower()
+        if not normalized_device_id:
+            raise HTTPException(status_code=400, detail="A trusted device id is required.")
+
+        app.state.paired_browsers = load_paired_browsers()
+        target_entry = None
+        for entry in app.state.paired_browsers:
+            entry_token = str(entry.get("token", "")).strip()
+            if _trusted_device_id(entry_token) == normalized_device_id:
+                target_entry = entry
+                break
+
+        if target_entry is None:
+            raise HTTPException(status_code=404, detail="That trusted device was not found.")
+
+        target_token = str(target_entry.get("token", "")).strip()
+        app.state.paired_browsers = [
+            entry
+            for entry in app.state.paired_browsers
+            if str(entry.get("token", "")).strip() != target_token
+        ]
+        save_paired_browsers(app.state.paired_browsers)
+        revoked_current = target_token == current_token
+        log_event(
+            "host",
+            "trusted-device-revoked",
+            {
+                "device_id": normalized_device_id,
+                "device_name": target_entry.get("device_name"),
+                "revoked_current": revoked_current,
+            },
+        )
+        return {"ok": True, "revoked_current": revoked_current}
 
     @app.get("/api/windows")
     async def windows(request: Request) -> dict[str, Any]:
@@ -418,51 +471,7 @@ def create_app(access_token: str, default_fps: int = 12, wake_relay_url: str | N
         log_event("host", "special-key-finished", {"hwnd": hwnd, "key": payload.key})
         return {"ok": True}
 
-    @app.get("/api/windows/{hwnd}/stream")
-    async def stream_window(
-        hwnd: int,
-        request: Request,
-        width: int = 1080,
-        fps: int | None = None,
-    ) -> StreamingResponse:
-        _require_token(app, request)
-        target_width = max(360, min(width, 1920))
-        target_fps = max(1, min(fps or app.state.default_fps, 12))
-
-        async def generate_frames() -> Any:
-            delay = 1.0 / target_fps
-            log_event(
-                "host",
-                "stream-started",
-                {"hwnd": hwnd, "target_width": target_width, "fps": target_fps},
-            )
-            while True:
-                if await request.is_disconnected():
-                    break
-
-                frame_started_at = time.perf_counter()
-                try:
-                    frame = capture_window(hwnd, target_width=target_width)
-                except WindowLookupError:
-                    frame = render_placeholder_frame("That window was closed or is no longer available.", target_width=target_width)
-                except RuntimeError as error:
-                    frame = render_placeholder_frame(str(error), target_width=target_width)
-                except (OSError, ValueError, pywintypes.error):
-                    frame = render_placeholder_frame("Windows would not let the app capture that window just now.", target_width=target_width)
-
-                payload = encode_jpeg(frame)
-                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + payload + b"\r\n"
-
-                remaining_delay = delay - (time.perf_counter() - frame_started_at)
-                if remaining_delay > 0:
-                    await asyncio.sleep(remaining_delay)
-
-            log_event("host", "stream-stopped", {"hwnd": hwnd, "target_width": target_width, "fps": target_fps})
-
-        return StreamingResponse(
-            generate_frames(),
-            media_type="multipart/x-mixed-replace; boundary=frame",
-        )
+    register_stream_routes(app, require_token=lambda request: _require_token(app, request))
 
     @app.websocket("/ws/input")
     async def input_socket(websocket: WebSocket) -> None:
@@ -544,7 +553,7 @@ def main() -> int:
     parser.add_argument("--host", default="0.0.0.0", help="Host interface to bind to.")
     parser.add_argument("--port", type=int, default=8765, help="Port to listen on.")
     parser.add_argument("--token", default=None, help="Optional access token shown to the phone.")
-    parser.add_argument("--fps", type=int, default=12, help="Default stream FPS.")
+    parser.add_argument("--fps", type=int, default=20, help="Default stream FPS.")
     parser.add_argument(
         "--wake-relay-url",
         default=None,
@@ -777,19 +786,35 @@ def _sleep_computer() -> None:
     raise OSError("Windows did not accept the sleep request.")
 
 
-def _require_token(app: FastAPI, request: Request) -> None:
+def _require_token(app: FastAPI, request: Request) -> str:
     provided = request.headers.get("X-Access-Token") or request.query_params.get("token")
     if not provided:
         raise HTTPException(status_code=401, detail="Approve this phone on both devices to connect.")
 
     if provided == app.state.access_token:
-        return
+        return provided
 
     for entry in app.state.paired_browsers:
         if str(entry.get("token", "")).strip() == provided:
-            return
+            touch_paired_browser(app.state.paired_browsers, provided)
+            return provided
 
     raise HTTPException(status_code=401, detail="Approve this phone on both devices to connect.")
+
+
+def _trusted_device_id(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:24]
+
+
+def _serialize_trusted_device(entry: dict[str, Any], current_token: str) -> dict[str, Any]:
+    token = str(entry.get("token", "")).strip()
+    return {
+        "id": _trusted_device_id(token),
+        "device_name": str(entry.get("device_name", "This phone")).strip() or "This phone",
+        "approved_at": str(entry.get("approved_at", "")).strip(),
+        "last_seen_at": str(entry.get("last_seen_at", "")).strip(),
+        "is_current": token == current_token,
+    }
 
 
 def _cleanup_expired_pairings(app: FastAPI) -> None:

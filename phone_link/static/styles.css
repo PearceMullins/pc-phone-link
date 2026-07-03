@@ -26,7 +26,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -111,6 +112,39 @@ button.mode-active {
   align-items: center;
   justify-content: flex-end;
   gap: 0.55rem;
+}
+
+.power-menu {
+  position: absolute;
+  bottom: calc(100% + 0.55rem);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  gap: 0.3rem;
+  min-width: 11rem;
+  padding: 0.45rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(143, 162, 202, 0.28);
+  background: #0c1322;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.power-menu.hidden {
+  display: none;
+}
+
+.power-menu-item {
+  width: 100%;
+  min-height: 2.7rem;
+  padding: 0.55rem 0.85rem;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.05);
+  border-color: transparent;
+}
+
+.power-menu-danger {
+  color: #ffb3a6;
+  background: rgba(255, 92, 74, 0.12);
 }
 
 .eyebrow {
@@ -355,8 +389,114 @@ button.mode-active {
   accent-color: #5f87ff;
 }
 
+.setting-select {
+  width: 100%;
+  min-height: 3rem;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(143, 162, 202, 0.24);
+  background: #09101d;
+  color: #f8fbff;
+  padding: 0.7rem 0.85rem;
+}
+
+.drawer-button-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.drawer-button-row button {
+  min-width: 0;
+  padding-inline: 0.55rem;
+}
+
 #applyTextScale {
   width: 100%;
+}
+
+.trusted-devices-section {
+  margin-top: 0.35rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: grid;
+  gap: 0.65rem;
+}
+
+.trusted-devices-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #dce6fb;
+  font-weight: 700;
+}
+
+.compact-button {
+  min-height: 2.4rem;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.86rem;
+}
+
+.trusted-devices-status {
+  margin: 0;
+  color: #9bb0d8;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.trusted-devices-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.trusted-device-card {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.75rem;
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.trusted-device-card.current {
+  border-color: rgba(255, 152, 93, 0.42);
+}
+
+.trusted-device-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.trusted-device-title strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.trusted-device-title span {
+  flex: 0 0 auto;
+  color: #ffb284;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.trusted-device-meta {
+  margin: 0;
+  color: #9bb0d8;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.trusted-device-card button {
+  min-height: 2.55rem;
+  padding-block: 0.55rem;
+}
+
+.viewer-shell.direct-touch-active .status-pill {
+  border-color: rgba(255, 152, 93, 0.38);
+  color: #ffe2cf;
 }
 
 .toggle-setting {

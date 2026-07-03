@@ -23,6 +23,7 @@ from .network import discover_access_urls
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "launcher_static"
+MAX_STREAM_FPS = 30
 LOG_DIR = (
     Path(os.environ["LOCALAPPDATA"]) if os.environ.get("LOCALAPPDATA") else Path.home() / "AppData" / "Local"
 ) / "PC Phone Link" / "logs"
@@ -33,7 +34,7 @@ def create_app(
     launcher_port: int,
     target_host: str = "0.0.0.0",
     target_port: int = 8765,
-    default_fps: int = 12,
+    default_fps: int = 20,
     wake_relay_url: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="PC Phone Link Launcher", docs_url=None, redoc_url=None)
@@ -41,7 +42,7 @@ def create_app(
     app.state.launcher_port = max(1, min(int(launcher_port), 65535))
     app.state.target_host = target_host.strip() or "0.0.0.0"
     app.state.target_port = max(1, min(int(target_port), 65535))
-    app.state.default_fps = max(1, min(int(default_fps), 12))
+    app.state.default_fps = max(1, min(int(default_fps), MAX_STREAM_FPS))
     app.state.wake_relay_url = _normalize_optional_text(wake_relay_url, field_name="wake relay URL")
     app.state.host_process = None
 
@@ -148,7 +149,7 @@ def main() -> int:
     parser.add_argument("--token", default=None, help="Optional access token shown to the phone.")
     parser.add_argument("--target-host", default="0.0.0.0", help="Host interface to bind the main controls to.")
     parser.add_argument("--target-port", type=int, default=8765, help="Main PC Phone Link host port.")
-    parser.add_argument("--fps", type=int, default=12, help="Default stream FPS for the started host server.")
+    parser.add_argument("--fps", type=int, default=20, help="Default stream FPS for the started host server.")
     parser.add_argument(
         "--auto-start-host",
         action="store_true",

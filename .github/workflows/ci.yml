@@ -40,4 +40,4 @@ jobs:
           java-version: "17"
 
       - name: Build debug APK
-        run: ./android_companion/gradlew -p android_companion assembleDebug
+        run: bash android_companion/gradlew -p android_companion assembleDebug

@@ -1,3 +1,4 @@
+<!-- User guides for installation, pairing, usage, troubleshooting, and development. -->
 # `docs`
 
 User and developer guides for PC Phone Link.

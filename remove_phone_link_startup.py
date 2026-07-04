@@ -1,3 +1,4 @@
+"""Remove the PC Phone Link shortcut from the Windows Startup folder."""
 from __future__ import annotations
 
 import argparse

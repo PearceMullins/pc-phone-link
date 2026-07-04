@@ -1,3 +1,4 @@
+<!-- PyInstaller specs and PowerShell script to build Windows release executables. -->
 # `packaging`
 
 Windows release build scripts and PyInstaller configuration.

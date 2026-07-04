@@ -1,3 +1,4 @@
+# Project metadata, version number, and Python package definition.
 [project]
 name = "pc-phone-link"
 version = "1.0.0"

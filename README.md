@@ -3,6 +3,8 @@
 
 > Control Windows apps from your phone browser — no native phone app required.
 
+[![Support on Patreon](https://img.shields.io/badge/Patreon-Support%20Pearce%20Mullins-F96854?logo=patreon&logoColor=white)](https://www.patreon.com/cw/PearceMullins)
+
 [![CI](https://github.com/PearceMullins/pc-phone-link/actions/workflows/ci.yml/badge.svg)](https://github.com/PearceMullins/pc-phone-link/actions/workflows/ci.yml)
 
 Stream individual windows or your full desktop, send touch and keyboard input, manage windows, and optionally wake your PC — all from a phone browser on your local network.

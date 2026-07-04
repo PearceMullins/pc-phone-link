@@ -1,3 +1,4 @@
+<!-- Security threat model and instructions for reporting vulnerabilities. -->
 # Security Policy
 
 ## Supported versions

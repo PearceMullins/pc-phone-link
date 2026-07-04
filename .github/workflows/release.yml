@@ -48,11 +48,7 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.value }}"
-          $staging = "pc-phone-link-v$version-source"
-          New-Item -ItemType Directory -Force -Path $staging | Out-Null
-          robocopy . $staging /E /XD .git .venv dist build android_companion\build android_companion\.gradle __pycache__ .pytest_cache .mypy_cache | Out-Null
-          if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE }
-          Compress-Archive -Path "$staging/*" -DestinationPath "pc-phone-link-v$version-source.zip"
+          git archive --format=zip --output "pc-phone-link-v$version-source.zip" HEAD
 
       - name: Extract release notes
         id: notes

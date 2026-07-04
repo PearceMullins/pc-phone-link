@@ -1,3 +1,4 @@
+# GitHub Actions CI: Python/JS checks and Android build on push and pull request.
 name: CI
 
 on:

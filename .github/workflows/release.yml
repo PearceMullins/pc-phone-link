@@ -1,3 +1,4 @@
+# GitHub Actions release: build Windows executables and source zip on version tags.
 name: Release
 
 on:

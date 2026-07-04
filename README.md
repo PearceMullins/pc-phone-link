@@ -1,3 +1,4 @@
+<!-- Project overview, quick start, pairing, usage, architecture, and documentation. -->
 # PC Phone Link
 
 > Control Windows apps from your phone browser — no native phone app required.

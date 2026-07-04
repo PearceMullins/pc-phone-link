@@ -1,3 +1,4 @@
+<!-- Optional Android app to send Wake-on-LAN packets and open the browser control URL. -->
 # `android_companion`
 
 Optional Android helper app — **not** the main phone UI.

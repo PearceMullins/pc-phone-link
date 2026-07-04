@@ -1,3 +1,4 @@
+<!-- Core Python package: host, launcher, wake relay, Win32 capture, and phone web UI. -->
 # `phone_link`
 
 Core Python package for the Windows host, launcher, wake relay, and phone web UI.

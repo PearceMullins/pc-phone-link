@@ -1,3 +1,4 @@
+"""Start the main PC Phone Link host on port 8765 (streaming, input, pairing)."""
 from __future__ import annotations
 
 import ctypes

@@ -1,3 +1,4 @@
+# Ignore virtual environments, build output, logs, and local-only files.
 .venv/
 __pycache__/
 *.py[cod]

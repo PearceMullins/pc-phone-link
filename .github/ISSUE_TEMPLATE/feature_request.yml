@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest an improvement for PC Phone Link
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: Share the problem you want solved and how you imagine PC Phone Link handling it.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What limitation or pain point are you hitting?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How would you like this to work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds or other approaches you thought about?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Phone UI
+        - Streaming
+        - Pairing / security
+        - Launcher / startup
+        - Wake-on-LAN
+        - Android companion
+        - Documentation
+        - Other
+    validations:
+      required: true

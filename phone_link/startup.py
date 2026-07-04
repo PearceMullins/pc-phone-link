@@ -8,6 +8,7 @@ from pathlib import Path
 import win32com.client
 
 from .logging_utils import log_event
+from .runtime_paths import app_root, is_frozen, launcher_executable, launcher_startup_arguments
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 STARTUP_SHORTCUT_NAME = "PC Phone Link Launcher.lnk"
@@ -45,7 +46,7 @@ def install_startup_shortcut(
 
     shell = win32com.client.Dispatch("WScript.Shell")
     shortcut = shell.CreateShortCut(str(shortcut_path))
-    target_path = resolve_startup_python()
+    target_path = resolve_startup_target()
     shortcut.TargetPath = str(target_path)
     shortcut.Arguments = _build_launcher_arguments(
         token=token,
@@ -56,7 +57,7 @@ def install_startup_shortcut(
         default_fps=default_fps,
         wake_relay_url=wake_relay_url,
     )
-    shortcut.WorkingDirectory = str(APP_ROOT)
+    shortcut.WorkingDirectory = str(app_root())
     shortcut.IconLocation = f"{target_path},0"
     shortcut.Description = "Start PC Phone Link automatically when this Windows user signs in."
     shortcut.Save()
@@ -106,8 +107,18 @@ def get_startup_directory() -> Path:
     return appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
 
 
-def resolve_startup_python() -> Path:
+def resolve_startup_target() -> Path:
     _require_windows()
+
+    if is_frozen():
+        executable = launcher_executable()
+        if executable.is_file():
+            log_event(
+                "startup",
+                "startup-target-resolved",
+                {"target_path": executable, "mode": "frozen"},
+            )
+            return executable
 
     executable = Path(sys.executable)
     candidates = [
@@ -120,12 +131,17 @@ def resolve_startup_python() -> Path:
         if candidate.is_file():
             log_event(
                 "startup",
-                "startup-python-resolved",
-                {"python_path": candidate},
+                "startup-target-resolved",
+                {"target_path": candidate, "mode": "python"},
             )
             return candidate
 
     raise OSError("Could not find a Python interpreter for the startup entry.")
+
+
+def resolve_startup_python() -> Path:
+    """Backward-compatible alias for resolve_startup_target()."""
+    return resolve_startup_target()
 
 
 def _build_launcher_arguments(
@@ -137,30 +153,15 @@ def _build_launcher_arguments(
     default_fps: int,
     wake_relay_url: str | None,
 ) -> str:
-    command = [
-        str(APP_ROOT / "run_phone_link_launcher.py"),
-        "--host",
-        launcher_host,
-        "--port",
-        str(launcher_port),
-        "--target-host",
-        target_host,
-        "--target-port",
-        str(target_port),
-        "--fps",
-        str(default_fps),
-        "--auto-start-host",
-    ]
-    if token:
-        normalized_token = token.strip().upper()
-        if not normalized_token:
-            raise ValueError("The access token cannot be empty.")
-        command.extend(["--token", normalized_token])
-    if wake_relay_url is not None:
-        normalized_wake_url = wake_relay_url.strip()
-        if not normalized_wake_url:
-            raise ValueError("The wake relay URL cannot be empty when provided.")
-        command.extend(["--wake-relay-url", normalized_wake_url])
+    command = launcher_startup_arguments(
+        token=token,
+        launcher_host=launcher_host,
+        launcher_port=launcher_port,
+        target_host=target_host,
+        target_port=target_port,
+        default_fps=default_fps,
+        wake_relay_url=wake_relay_url,
+    )
     return subprocess.list2cmdline(command)
 
 

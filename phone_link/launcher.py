@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from .host_access import resolve_access_token
 from .logging_utils import log_event, summarize_http_request
 from .network import discover_access_urls
+from .runtime_paths import app_root, host_launch_command
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "launcher_static"
@@ -309,32 +310,26 @@ def _ensure_host_started(app: FastAPI) -> dict[str, bool]:
 
 
 def _start_host_process(app: FastAPI) -> subprocess.Popen[Any]:
-    command = [
-        sys.executable,
-        str(APP_DIR.parent / "run_phone_link.py"),
-        "--host",
-        app.state.target_host,
-        "--port",
-        str(app.state.target_port),
-        "--token",
-        app.state.access_token,
-        "--fps",
-        str(app.state.default_fps),
-    ]
-    if app.state.wake_relay_url:
-        command.extend(["--wake-relay-url", app.state.wake_relay_url])
+    command = host_launch_command(
+        target_host=app.state.target_host,
+        target_port=app.state.target_port,
+        access_token=app.state.access_token,
+        default_fps=app.state.default_fps,
+        wake_relay_url=app.state.wake_relay_url,
+    )
 
     log_path = _default_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    working_directory = app_root()
     with log_path.open("ab") as log_file:
         log_file.write(f"\n[{timestamp}] Starting PC Phone Link host\n".encode("utf-8"))
         log_file.write(("Command: " + " ".join(command) + "\n").encode("utf-8"))
         log_file.flush()
         process = subprocess.Popen(
             command,
-            cwd=str(APP_DIR.parent),
+            cwd=str(working_directory),
             stdout=log_file,
             stderr=log_file,
             creationflags=creation_flags,
@@ -346,7 +341,7 @@ def _start_host_process(app: FastAPI) -> subprocess.Popen[Any]:
         "host-process-launch-command-built",
         {
             "pid": process.pid,
-            "cwd": APP_DIR.parent,
+            "cwd": working_directory,
             "target_host": app.state.target_host,
             "target_port": app.state.target_port,
             "default_fps": app.state.default_fps,

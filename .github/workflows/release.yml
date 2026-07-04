@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Windows executables
+        shell: pwsh
+        run: .\packaging\build_release.ps1
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $content = Get-Content pyproject.toml -Raw
+          if ($content -match 'version\s*=\s*"([^"]+)"') {
+            "value=$($Matches[1])" >> $env:GITHUB_OUTPUT
+          } else {
+            throw "Could not read version"
+          }
+
+      - name: Package Windows release zip
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.value }}"
+          Compress-Archive -Path "dist/PCPhoneLink/*" -DestinationPath "PCPhoneLink-Windows-x64-v$version.zip"
+
+      - name: Package source zip
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.value }}"
+          $staging = "pc-phone-link-v$version-source"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          robocopy . $staging /E /XD .git .venv dist build android_companion\build android_companion\.gradle __pycache__ .pytest_cache .mypy_cache | Out-Null
+          if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE }
+          Compress-Archive -Path "$staging/*" -DestinationPath "pc-phone-link-v$version-source.zip"
+
+      - name: Extract release notes
+        id: notes
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.value }}"
+          $lines = Get-Content CHANGELOG.md
+          $capture = $false
+          $notes = New-Object System.Collections.Generic.List[string]
+          foreach ($line in $lines) {
+            if ($line -match "^## \[$version\]") {
+              $capture = $true
+              continue
+            }
+            if ($capture -and $line -match "^## \[") {
+              break
+            }
+            if ($capture) {
+              $notes.Add($line)
+            }
+          }
+          if ($notes.Count -eq 0) {
+            $notes.Add("PC Phone Link v$version")
+          }
+          $path = "release-notes.md"
+          ($notes -join "`n") | Set-Content -Path $path -Encoding utf8
+          "path=$path" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            PCPhoneLink-Windows-x64-v${{ steps.version.outputs.value }}.zip
+            pc-phone-link-v${{ steps.version.outputs.value }}-source.zip
+          body_path: ${{ steps.notes.outputs.path }}
+          draft: false
+          prerelease: false

@@ -1,0 +1,75 @@
+name: Bug report
+description: Report a problem with PC Phone Link
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to report a bug.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag, `.exe` bundle, or git commit
+      placeholder: v1.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: How are you running PC Phone Link?
+      options:
+        - Release `.exe` bundle
+        - Python from source
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: windows_version
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do before the problem happened?
+      placeholder: |
+        1. Start PCPhoneLinkLauncher.exe
+        2. Open launcher URL on phone
+        3. Tap Start controls
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Redact access tokens before posting
+      placeholder: Paste relevant lines from %LOCALAPPDATA%\PC Phone Link\logs\
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Screenshots, network setup, VPN, firewall notes

@@ -1,0 +1,23 @@
+[project]
+name = "pc-phone-link"
+version = "1.0.0"
+description = "Control Windows from your phone browser — window streaming, input, pairing, and Wake-on-LAN."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Pearce Mullins" }]
+dependencies = [
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.30,<1.0",
+    "pillow>=10.4,<12.0",
+    "pywin32>=308",
+]
+
+[project.scripts]
+pc-phone-link-host = "phone_link.app:main"
+pc-phone-link-launcher = "phone_link.launcher:main"
+pc-phone-link-wake-relay = "phone_link.wake_relay:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

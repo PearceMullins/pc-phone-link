@@ -9,3 +9,11 @@ __pycache__/
 .vscode/
 .idea/
 Thumbs.db
+dist/
+build/
+*.spec.bak
+android_companion/**/build/
+android_companion/.gradle/
+GrokChat.md
+start_copilot.py
+.serena/

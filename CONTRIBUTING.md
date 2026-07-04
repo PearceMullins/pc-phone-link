@@ -1,3 +1,4 @@
+<!-- How to set up a dev environment, run checks, and submit pull requests. -->
 # Contributing to PC Phone Link
 
 Thank you for your interest in improving PC Phone Link.

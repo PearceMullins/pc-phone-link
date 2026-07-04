@@ -1,3 +1,4 @@
+"""Install a Windows Startup shortcut that launches PC Phone Link at sign-in."""
 from __future__ import annotations
 
 import argparse

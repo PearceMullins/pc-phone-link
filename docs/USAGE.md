@@ -2,10 +2,6 @@
 
 Once paired, the phone browser becomes a remote control for a selected Windows window or the full desktop.
 
-## Phone UI overview
-
-![Phone UI showing keyboard input and controls](images/phone-ui.png)
-
 ## Pick a window
 
 1. Open the **Windows** panel on the phone

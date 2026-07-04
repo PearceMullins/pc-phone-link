@@ -8,8 +8,6 @@ Stream individual windows or your full desktop, send touch and keyboard input, m
 
 **[Download latest release](https://github.com/PearceMullins/pc-phone-link/releases)** · **[Quick start](#quick-start)** · **[Pairing guide](docs/PAIRING.md)**
 
-![Phone UI — keyboard input and remote controls](docs/images/phone-ui.png)
-
 ## Features
 
 - **Window streaming** — Capture a single app window or fullscreen desktop with adaptive WebSocket streaming and MJPEG fallback

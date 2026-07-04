@@ -39,6 +39,33 @@ python run_phone_link_launcher.py --host 0.0.0.0 --port 8764 --target-port 8765
 
 Full setup: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 
+## Project structure
+
+Top-level files and folders in this repository:
+
+| Path | Description |
+| ---- | ----------- |
+| [`.github/`](.github/) | GitHub Actions CI/release workflows, issue templates, and pull request template |
+| [`android_companion/`](android_companion/) | Optional Android app to wake the PC and open the browser control URL |
+| [`docs/`](docs/) | Installation, pairing, usage, troubleshooting, and development guides |
+| [`packaging/`](packaging/) | PyInstaller specs and the PowerShell script that builds Windows release executables |
+| [`phone_link/`](phone_link/) | Core Python package — host, launcher, wake relay, Win32 capture, and phone web UI |
+| [`.gitignore`](.gitignore) | Ignored build artifacts, virtual environments, logs, and local-only files |
+| [`CHANGELOG.md`](CHANGELOG.md) | Version history and release notes |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to set up a dev environment and submit changes |
+| [`LICENSE`](LICENSE) | MIT license |
+| [`README.md`](README.md) | Project overview, quick start, and architecture |
+| [`SECURITY.md`](SECURITY.md) | Threat model and how to report security issues |
+| [`install_phone_link_startup.py`](install_phone_link_startup.py) | Adds a Windows Startup shortcut that runs the launcher at sign-in |
+| [`pyproject.toml`](pyproject.toml) | Project metadata, version number, and Python package definition |
+| [`remove_phone_link_startup.py`](remove_phone_link_startup.py) | Removes the Windows Startup shortcut installed by the installer script |
+| [`requirements.txt`](requirements.txt) | Python dependencies for running from source |
+| [`run_phone_link.py`](run_phone_link.py) | Entry point for the main host service (port 8765) |
+| [`run_phone_link_launcher.py`](run_phone_link_launcher.py) | Entry point for the launcher service (port 8764) |
+| [`run_wake_relay.py`](run_wake_relay.py) | Entry point for the optional Wake-on-LAN relay (port 8780) |
+
+Each folder above contains its own `README.md` with more detail.
+
 ## Architecture
 
 ```mermaid

@@ -1,9 +1,14 @@
 <!-- Project overview, quick start, pairing, usage, architecture, and documentation. -->
+
+<p align="center">
+  <a href="https://www.patreon.com/cw/PearceMullins">
+    <img src="https://img.shields.io/badge/Patreon-FF424D?style=for-the-badge&logo=patreon&logoColor=white" alt="Patreon" />
+  </a>
+</p>
+
 # PC Phone Link
 
 > Control Windows apps from your phone browser — no native phone app required.
-
-[![Support on Patreon](https://img.shields.io/badge/Patreon-Support%20Pearce%20Mullins-F96854?logo=patreon&logoColor=white)](https://www.patreon.com/cw/PearceMullins)
 
 [![CI](https://github.com/PearceMullins/pc-phone-link/actions/workflows/ci.yml/badge.svg)](https://github.com/PearceMullins/pc-phone-link/actions/workflows/ci.yml)
 

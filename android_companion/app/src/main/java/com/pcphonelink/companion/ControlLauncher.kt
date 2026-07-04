@@ -37,15 +37,13 @@ object ControlLauncher {
                 delay(initialDelayMs)
             }
             val deadline = System.currentTimeMillis() + timeoutMs
-            while (true) {
+            while (System.currentTimeMillis() < deadline) {
                 if (isReachable(controlUrl)) {
                     return@withContext true
                 }
-                if (System.currentTimeMillis() >= deadline) {
-                    return@withContext false
-                }
                 delay(pollIntervalMs)
             }
+            return@withContext false
         }
     }
 

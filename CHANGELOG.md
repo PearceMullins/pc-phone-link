@@ -1,3 +1,4 @@
+<!-- Version history and release notes for PC Phone Link. -->
 # Changelog
 
 All notable changes to PC Phone Link are documented in this file.

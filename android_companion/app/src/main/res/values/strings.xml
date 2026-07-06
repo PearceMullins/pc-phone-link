@@ -3,9 +3,7 @@
     <string name="app_name">PC Phone Link Companion</string>
     <string name="intro_text">Wake your PC with a native UDP magic packet, then launch the existing PC Phone Link control page in your browser.</string>
     <string name="control_url_label">Control URL</string>
-    <string name="control_url_hint">http://192.168.1.161:8765/?token=PC1234</string>
-    <string name="launcher_start_url_label">Launcher start URL (optional)</string>
-    <string name="launcher_start_url_hint">http://192.168.1.161:8764/api/start?token=PC1234</string>
+    <string name="control_url_hint">http://192.168.1.161:8765/</string>
     <string name="mac_address_label">PC MAC address</string>
     <string name="mac_address_hint">A0:36:BC:E7:CA:3A</string>
     <string name="broadcast_address_label">Broadcast address</string>
@@ -21,18 +19,16 @@
     <string name="status_sending_wake">Sending wake packet...</string>
     <string name="status_wake_sent">Wake packet sent.</string>
     <string name="status_waiting_for_pc">Waiting for the PC to answer...</string>
-    <string name="status_starting_controls">Starting the PC controls...</string>
     <string name="status_opening_controls">Opening the PC controls...</string>
     <string name="status_action_failed">Action failed.</string>
     <string name="toast_settings_saved">Saved.</string>
     <string name="toast_wake_sent">Wake packet sent.</string>
     <string name="toast_controls_opened">Opening controls.</string>
     <string name="error_generic">Something went wrong.</string>
-    <string name="error_control_url">Enter the full control URL, including the token.</string>
-    <string name="error_launcher_url">Enter a valid launcher start URL or leave it empty.</string>
+    <string name="error_control_url">Enter the full control URL for your PC.</string>
     <string name="error_mac_address">Enter the PC MAC address as 12 hexadecimal characters.</string>
     <string name="error_wol_port">Enter a valid UDP port from 1 to 65535.</string>
     <string name="error_controls_timeout">The PC controls did not come online in time.</string>
     <string name="error_no_browser">No browser app is available to open the controls.</string>
-    <string name="footer_text">Direct wake works when your phone is on the same LAN or a VPN/Tailscale connection to your home network. The optional launcher start URL helps after a cold boot if the PC has already auto-signed in.</string>
+    <string name="footer_text">Direct wake works when your phone is on the same LAN or a VPN/Tailscale connection to your home network. Make sure PC Phone Link is set to start automatically when Windows signs in.</string>
 </resources>

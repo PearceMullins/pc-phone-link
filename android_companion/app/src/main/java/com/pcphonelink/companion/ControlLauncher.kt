@@ -6,26 +6,8 @@ import java.net.URL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 
 object ControlLauncher {
-    suspend fun startControls(startUrl: String) {
-        withContext(Dispatchers.IO) {
-            val connection = openConnection(startUrl, method = "POST")
-            try {
-                connection.doOutput = true
-                connection.outputStream.use { }
-                val statusCode = connection.responseCode
-                if (statusCode in 200..299) {
-                    return@withContext
-                }
-                throw IOException(readFailureMessage(connection, statusCode))
-            } finally {
-                connection.disconnect()
-            }
-        }
-    }
-
     suspend fun waitForReachable(
         controlUrl: String,
         timeoutMs: Long,
@@ -67,24 +49,5 @@ object ControlLauncher {
         connection.readTimeout = 5_000
         connection.setRequestProperty("User-Agent", "PC Phone Link Companion")
         return connection
-    }
-
-    private fun readFailureMessage(connection: HttpURLConnection, statusCode: Int): String {
-        val body = try {
-            val stream = connection.errorStream ?: connection.inputStream
-            stream?.bufferedReader()?.use { it.readText() }?.trim().orEmpty()
-        } catch (_: IOException) {
-            ""
-        }
-        if (body.isBlank()) {
-            return "The launcher returned HTTP $statusCode."
-        }
-
-        return try {
-            val parsed = JSONObject(body)
-            parsed.optString("detail").ifBlank { parsed.optString("message") }.ifBlank { body }
-        } catch (_: Exception) {
-            body
-        }
     }
 }

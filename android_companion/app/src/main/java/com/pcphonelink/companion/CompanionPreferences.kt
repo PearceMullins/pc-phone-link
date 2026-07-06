@@ -4,7 +4,6 @@ import android.content.Context
 
 data class CompanionConfig(
     val controlUrl: String,
-    val launcherStartUrl: String?,
     val macAddress: String,
     val broadcastAddress: String,
     val wolPort: Int,
@@ -16,7 +15,6 @@ class CompanionPreferences(context: Context) {
     fun load(): CompanionConfig {
         return CompanionConfig(
             controlUrl = sharedPreferences.getString(KEY_CONTROL_URL, "") ?: "",
-            launcherStartUrl = sharedPreferences.getString(KEY_LAUNCHER_START_URL, "")?.takeIf { it.isNotBlank() },
             macAddress = sharedPreferences.getString(KEY_MAC_ADDRESS, "") ?: "",
             broadcastAddress = sharedPreferences.getString(KEY_BROADCAST_ADDRESS, DEFAULT_BROADCAST_ADDRESS)
                 ?: DEFAULT_BROADCAST_ADDRESS,
@@ -27,7 +25,6 @@ class CompanionPreferences(context: Context) {
     fun save(config: CompanionConfig) {
         sharedPreferences.edit()
             .putString(KEY_CONTROL_URL, config.controlUrl)
-            .putString(KEY_LAUNCHER_START_URL, config.launcherStartUrl.orEmpty())
             .putString(KEY_MAC_ADDRESS, config.macAddress)
             .putString(KEY_BROADCAST_ADDRESS, config.broadcastAddress)
             .putInt(KEY_WOL_PORT, config.wolPort)
@@ -37,7 +34,6 @@ class CompanionPreferences(context: Context) {
     companion object {
         private const val PREFERENCES_NAME = "pc_phone_link_companion"
         private const val KEY_CONTROL_URL = "control_url"
-        private const val KEY_LAUNCHER_START_URL = "launcher_start_url"
         private const val KEY_MAC_ADDRESS = "mac_address"
         private const val KEY_BROADCAST_ADDRESS = "broadcast_address"
         private const val KEY_WOL_PORT = "wol_port"

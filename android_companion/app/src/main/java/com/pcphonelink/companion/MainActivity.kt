@@ -3,6 +3,7 @@ package com.pcphonelink.companion
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -32,7 +33,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun populateFields(config: CompanionConfig) {
         binding.controlUrlInput.setText(config.controlUrl)
-        binding.launcherStartUrlInput.setText(config.launcherStartUrl.orEmpty())
         binding.macAddressInput.setText(config.macAddress)
         binding.broadcastAddressInput.setText(config.broadcastAddress)
         binding.wolPortInput.setText(config.wolPort.toString())
@@ -69,25 +69,11 @@ class MainActivity : AppCompatActivity() {
             ) {
                 WakeOnLanSender.send(config)
                 setStatus(getString(R.string.status_waiting_for_pc))
-                var controlsReady = ControlLauncher.waitForReachable(
+                val controlsReady = ControlLauncher.waitForReachable(
                     controlUrl = config.controlUrl,
-                    timeoutMs = 15_000,
+                    timeoutMs = 90_000,
                     initialDelayMs = 4_000,
                 )
-                if (!controlsReady && !config.launcherStartUrl.isNullOrBlank()) {
-                    setStatus(getString(R.string.status_starting_controls))
-                    ControlLauncher.startControls(config.launcherStartUrl)
-                    controlsReady = ControlLauncher.waitForReachable(
-                        controlUrl = config.controlUrl,
-                        timeoutMs = 90_000,
-                        initialDelayMs = 4_000,
-                    )
-                } else if (!controlsReady) {
-                    controlsReady = ControlLauncher.waitForReachable(
-                        controlUrl = config.controlUrl,
-                        timeoutMs = 90_000,
-                    )
-                }
 
                 if (!controlsReady) {
                     throw IOException(getString(R.string.error_controls_timeout))
@@ -132,12 +118,35 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openControls(controlUrl: String) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(controlUrl))
+        val baseUri = Uri.parse(controlUrl)
+        val controlUri = if (
+            baseUri.getQueryParameter("device").isNullOrBlank() &&
+            baseUri.getQueryParameter("device_name").isNullOrBlank()
+        ) {
+            baseUri.buildUpon()
+                .appendQueryParameter("device", getDeviceName())
+                .build()
+        } else {
+            baseUri
+        }
+        val intent = Intent(Intent.ACTION_VIEW, controlUri)
         try {
             startActivity(intent)
         } catch (_: ActivityNotFoundException) {
             throw IOException(getString(R.string.error_no_browser))
         }
+    }
+
+    private fun getDeviceName(): String {
+        val manufacturer = Build.MANUFACTURER.trim()
+        val model = Build.MODEL.trim()
+        val rawName = when {
+            model.isBlank() -> manufacturer
+            manufacturer.isBlank() -> model
+            model.lowercase(Locale.US).startsWith(manufacturer.lowercase(Locale.US)) -> model
+            else -> "$manufacturer $model"
+        }
+        return rawName.replace(Regex("\\s+"), " ").trim().take(80).ifBlank { "Android phone" }
     }
 
     private fun readWakeConfigFromUi(): CompanionConfig? {
@@ -146,12 +155,6 @@ class MainActivity : AppCompatActivity() {
         val controlUrl = binding.controlUrlInput.text.toString().trim()
         if (!isValidHttpUrl(controlUrl)) {
             binding.controlUrlInput.error = getString(R.string.error_control_url)
-            return null
-        }
-
-        val launcherStartUrl = binding.launcherStartUrlInput.text.toString().trim().ifBlank { null }
-        if (launcherStartUrl != null && !isValidHttpUrl(launcherStartUrl)) {
-            binding.launcherStartUrlInput.error = getString(R.string.error_launcher_url)
             return null
         }
 
@@ -173,7 +176,6 @@ class MainActivity : AppCompatActivity() {
 
         return CompanionConfig(
             controlUrl = controlUrl,
-            launcherStartUrl = launcherStartUrl,
             macAddress = macAddress,
             broadcastAddress = broadcastAddress,
             wolPort = wolPort,
@@ -182,8 +184,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun clearFieldErrors() {
         binding.controlUrlInput.error = null
-        binding.launcherStartUrlInput.error = null
         binding.macAddressInput.error = null
+        binding.broadcastAddressInput.error = null
         binding.wolPortInput.error = null
     }
 

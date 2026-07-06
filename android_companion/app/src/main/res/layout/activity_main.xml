@@ -41,20 +41,6 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/launcher_start_url_label"
-            android:textStyle="bold" />
-
-        <EditText
-            android:id="@+id/launcherStartUrlInput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/launcher_start_url_hint"
-            android:inputType="textUri" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/mac_address_label"
             android:textStyle="bold" />
 

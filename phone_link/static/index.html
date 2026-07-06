@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>PC Phone Link</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=20260702b">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260704c">
 </head>
 <body>
   <div id="app">
@@ -170,19 +170,24 @@
     </section>
 
     <section id="authPanel" class="auth-panel">
-      <form id="authForm" class="auth-card">
+      <div class="auth-card">
         <h2>Connect your phone</h2>
-        <p id="pairingStatus" class="auth-status">Send a connection request to this PC, then approve it on both devices to pair this browser.</p>
-        <input id="pairingDeviceName" type="text" placeholder="This phone" autocomplete="off">
-        <div class="auth-actions">
-          <button id="requestPairing" class="ghost-button" type="submit">Send request</button>
-          <button id="approvePairing" class="primary-button" type="button" disabled>Approve on this phone</button>
+        <p id="connectStatus" class="auth-status">Confirm the session code matches your PC, then tap Connect.</p>
+        <label class="device-name-field" for="pairingDeviceName">
+          <span>This phone will appear on the PC as</span>
+          <input id="pairingDeviceName" type="text" maxlength="80" autocomplete="nickname" spellcheck="false">
+        </label>
+        <p id="connectCodeDisplay" class="connect-code">----</p>
+        <div id="pairingApprovalCodeBlock" class="approval-code-block" hidden>
+          <span>Access code for this phone</span>
+          <p id="pairingApprovalCodeDisplay" class="connect-code">----</p>
         </div>
-      </form>
+        <button id="connectButton" class="primary-button" type="button">Connect</button>
+      </div>
     </section>
 
     <div id="toast" class="toast hidden"></div>
   </div>
-  <script src="/assets/app.js?v=20260702b" defer></script>
+  <script src="/assets/app.js?v=20260706b" defer></script>
 </body>
 </html>

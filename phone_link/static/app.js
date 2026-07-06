@@ -1,8 +1,11 @@
 const state = {
   token: null,
-  pairingRequestId: null,
-  pairingRequestInFlight: false,
-  pairingPhoneApproved: false,
+  connectCode: null,
+  connectInFlight: false,
+  pairingApprovalCode: null,
+  pairingDeviceName: null,
+  connectInfoPollTimer: null,
+  connectInfoPollAttempts: 0,
   pairingPollTimer: null,
   selectedWindow: null,
   windows: [],
@@ -121,9 +124,13 @@ const FIT_SHAPES = {
 const elements = {
   app: document.getElementById("app"),
   applyTextScale: document.getElementById("applyTextScale"),
-  authForm: document.getElementById("authForm"),
   authPanel: document.getElementById("authPanel"),
-  approvePairing: document.getElementById("approvePairing"),
+  connectButton: document.getElementById("connectButton"),
+  connectCodeDisplay: document.getElementById("connectCodeDisplay"),
+  connectStatus: document.getElementById("connectStatus"),
+  pairingApprovalCodeBlock: document.getElementById("pairingApprovalCodeBlock"),
+  pairingApprovalCodeDisplay: document.getElementById("pairingApprovalCodeDisplay"),
+  pairingDeviceName: document.getElementById("pairingDeviceName"),
   clearTextInput: document.getElementById("clearTextInput"),
   controlBar: document.getElementById("controlBar"),
   deviceName: document.getElementById("deviceName"),
@@ -142,14 +149,11 @@ const elements = {
   messageHistorySection: document.getElementById("messageHistorySection"),
   mouseSpeed: document.getElementById("mouseSpeed"),
   mouseSpeedValue: document.getElementById("mouseSpeedValue"),
-  pairingDeviceName: document.getElementById("pairingDeviceName"),
-  pairingStatus: document.getElementById("pairingStatus"),
   powerMenu: document.getElementById("powerMenu"),
   powerToggle: document.getElementById("powerToggle"),
   refreshWindows: document.getElementById("refreshWindows"),
   refreshTrustedDevices: document.getElementById("refreshTrustedDevices"),
   remoteView: document.getElementById("remoteView"),
-  requestPairing: document.getElementById("requestPairing"),
   restoreWindow: document.getElementById("restoreWindow"),
   rightClickMode: document.getElementById("rightClickMode"),
   scrollDown: document.getElementById("scrollDown"),
@@ -925,10 +929,28 @@ function loadMessageComposerState() {
   renderMessageHistory();
 }
 
-function getDefaultPairingDeviceName() {
+function normalizePairingDeviceName(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+function getUrlPairingDeviceName() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return normalizePairingDeviceName(params.get("device") || params.get("device_name"));
+  } catch {
+    return "";
+  }
+}
+
+function guessPairingDeviceName() {
+  const urlName = getUrlPairingDeviceName();
+  if (urlName) {
+    return urlName;
+  }
+
   const storedName = window.localStorage.getItem(PAIRING_DEVICE_NAME_STORAGE_KEY);
   if (storedName && storedName.trim()) {
-    return storedName.trim();
+    return normalizePairingDeviceName(storedName);
   }
 
   const userAgent = navigator.userAgent || "";
@@ -944,157 +966,253 @@ function getDefaultPairingDeviceName() {
   return "This phone";
 }
 
-function setPairingStatus(message) {
-  elements.pairingStatus.textContent = message || "Send a connection request to this PC, then approve it on both devices to pair this browser.";
-}
-
-function stopPairingPolling() {
-  if (!state.pairingPollTimer) {
-    return;
+function syncPairingDeviceNameInput() {
+  const deviceName = normalizePairingDeviceName(elements.pairingDeviceName?.value) || state.pairingDeviceName || guessPairingDeviceName();
+  state.pairingDeviceName = deviceName;
+  if (elements.pairingDeviceName && elements.pairingDeviceName.value !== deviceName) {
+    elements.pairingDeviceName.value = deviceName;
   }
-  window.clearInterval(state.pairingPollTimer);
-  state.pairingPollTimer = null;
+  return deviceName;
 }
 
-function clearPairingRequest({ message = null } = {}) {
-  stopPairingPolling();
-  state.pairingRequestId = null;
-  state.pairingPhoneApproved = false;
-  state.pairingRequestInFlight = false;
-  if (message) {
-    setPairingStatus(message);
-  }
-  syncPairingControls();
+function getPairingDeviceName() {
+  const deviceName = syncPairingDeviceNameInput();
+  window.localStorage.setItem(PAIRING_DEVICE_NAME_STORAGE_KEY, deviceName);
+  return deviceName;
 }
 
-function syncPairingControls() {
-  const hasPendingRequest = Boolean(state.pairingRequestId);
-  elements.pairingDeviceName.disabled = hasPendingRequest || state.pairingRequestInFlight;
-  elements.requestPairing.disabled = state.pairingRequestInFlight || hasPendingRequest;
-  elements.requestPairing.textContent = state.pairingRequestInFlight ? "Sending request..." : "Send request";
-  elements.approvePairing.disabled = state.pairingRequestInFlight || !hasPendingRequest || state.pairingPhoneApproved;
-  elements.approvePairing.textContent = state.pairingPhoneApproved ? "Approved on this phone" : "Approve on this phone";
+const CONNECT_INFO_POLL_INTERVAL_MS = 1500;
+const CONNECT_INFO_POLL_MAX_ATTEMPTS = 30;
+const PAIRING_POLL_INTERVAL_MS = 1500;
+const PAIRING_POLL_MAX_ATTEMPTS = 200;
+
+function setConnectStatus(message) {
+  elements.connectStatus.textContent = message || "Confirm the session code matches your PC, then tap Connect.";
 }
 
-async function finishPairing(accessToken) {
-  stopPairingPolling();
-  state.pairingRequestId = null;
-  state.pairingPhoneApproved = false;
-  state.token = accessToken;
-  window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, accessToken);
-  elements.authPanel.classList.add("hidden");
-  syncPairingControls();
-  const connected = await bootstrap({ quiet: true });
-  if (!connected) {
-    elements.authPanel.classList.remove("hidden");
-  }
-}
-
-async function applyPairingResponse(response) {
-  if (response?.pairing_id) {
-    state.pairingRequestId = response.pairing_id;
-  }
-  state.pairingPhoneApproved = Boolean(response?.phone_approved);
-  setPairingStatus(response?.message);
-
-  if (response?.access_token) {
-    await finishPairing(response.access_token);
+function applyInjectedConnectCode() {
+  const injectedCode = window.__PC_PHONE_LINK_CONNECT_CODE__;
+  if (typeof injectedCode === "string" && injectedCode.trim()) {
+    state.connectCode = injectedCode.trim();
+    syncConnectControls();
     return true;
   }
-
-  if (response?.status === "expired" || response?.status === "rejected") {
-    clearPairingRequest({ message: response.message });
-    return false;
-  }
-
-  syncPairingControls();
   return false;
 }
 
-async function pollPairingStatus({ quiet = true } = {}) {
-  if (!state.pairingRequestId) {
-    return false;
+function stopConnectInfoPolling() {
+  if (state.connectInfoPollTimer) {
+    window.clearInterval(state.connectInfoPollTimer);
+    state.connectInfoPollTimer = null;
+  }
+  state.connectInfoPollAttempts = 0;
+}
+
+function startConnectInfoPolling() {
+  stopConnectInfoPolling();
+  if (!elements.authPanel || elements.authPanel.classList.contains("hidden")) {
+    return;
   }
 
+  state.connectInfoPollTimer = window.setInterval(() => {
+    if (!elements.authPanel || elements.authPanel.classList.contains("hidden")) {
+      stopConnectInfoPolling();
+      return;
+    }
+
+    state.connectInfoPollAttempts += 1;
+    loadConnectInfo({ quiet: true }).then((loaded) => {
+      if (loaded) {
+        setConnectStatus("Confirm the session code matches your PC, then tap Connect.");
+        stopConnectInfoPolling();
+        return;
+      }
+      if (state.connectInfoPollAttempts >= CONNECT_INFO_POLL_MAX_ATTEMPTS) {
+        stopConnectInfoPolling();
+        setConnectStatus("Could not load the connect code. Refresh this page and try again.");
+      }
+    });
+  }, CONNECT_INFO_POLL_INTERVAL_MS);
+}
+
+function syncConnectControls() {
+  const code = state.connectCode || "----";
+  const approvalCode = state.pairingApprovalCode || "";
+  if (elements.connectCodeDisplay) {
+    elements.connectCodeDisplay.textContent = code;
+  }
+  if (elements.pairingApprovalCodeBlock) {
+    elements.pairingApprovalCodeBlock.hidden = !approvalCode;
+  }
+  if (elements.pairingApprovalCodeDisplay) {
+    elements.pairingApprovalCodeDisplay.textContent = approvalCode || "----";
+  }
+  if (elements.connectButton) {
+    elements.connectButton.disabled = state.connectInFlight || !state.connectCode;
+    elements.connectButton.textContent = state.connectInFlight ? "Connecting..." : `Connect · ${code}`;
+  }
+}
+
+async function loadConnectInfo({ quiet = false } = {}) {
   try {
-    const response = await apiFetch(`/api/pairing/${encodeURIComponent(state.pairingRequestId)}`);
-    return applyPairingResponse(response);
+    const response = await fetch("/api/connect-info");
+    if (!response.ok) {
+      throw new Error("Could not load the connect code from this PC.");
+    }
+    const payload = await response.json();
+    state.connectCode = payload.connect_code || null;
+    syncConnectControls();
+    return Boolean(state.connectCode);
   } catch (error) {
-    clearPairingRequest({ message: error.message });
     if (!quiet) {
-      showToast(error.message || "Connection request failed.");
+      setConnectStatus(error.message || "Could not load the connect code from this PC.");
     }
+    syncConnectControls();
     return false;
   }
 }
 
-function startPairingPolling() {
+async function finishPairing(accessToken) {
+  stopConnectInfoPolling();
   stopPairingPolling();
-  if (!state.pairingRequestId) {
-    return;
-  }
-  state.pairingPollTimer = window.setInterval(() => {
-    void pollPairingStatus();
-  }, 1000);
-}
-
-async function requestPairing() {
-  const deviceName = (elements.pairingDeviceName.value || getDefaultPairingDeviceName()).trim() || "This phone";
-  elements.pairingDeviceName.value = deviceName;
-  window.localStorage.setItem(PAIRING_DEVICE_NAME_STORAGE_KEY, deviceName);
-  state.pairingRequestInFlight = true;
-  setPairingStatus("Sending connection request to the PC.");
-  syncPairingControls();
-  try {
-    const response = await apiFetch("/api/pairing/request", {
-      method: "POST",
-      body: JSON.stringify({ device_name: deviceName }),
-    });
-    const connected = await applyPairingResponse(response);
-    if (!connected && state.pairingRequestId) {
-      startPairingPolling();
-    }
-  } finally {
-    state.pairingRequestInFlight = false;
-    syncPairingControls();
+  state.token = accessToken;
+  window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, accessToken);
+  elements.authPanel.classList.add("hidden");
+  syncConnectControls();
+  const connected = await bootstrap({ quiet: true });
+  if (!connected) {
+    elements.authPanel.classList.remove("hidden");
+    beginConnectFlow();
   }
 }
 
-async function approvePairingOnPhone() {
-  if (!state.pairingRequestId) {
+function setPairingApprovalCode(approvalCode) {
+  state.pairingApprovalCode = String(approvalCode || "").trim();
+  syncConnectControls();
+}
+
+async function waitForPcApproval(pairingId, deviceName, approvalCode = null) {
+  stopPairingPolling();
+  setPairingApprovalCode(approvalCode);
+  const waitingLabel = deviceName
+    ? `Waiting for PC approval of ${deviceName}. Match this access code on the PC.`
+    : "Waiting for PC approval. Match this access code on the PC.";
+  setConnectStatus(waitingLabel);
+  for (let attempt = 0; attempt < PAIRING_POLL_MAX_ATTEMPTS; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, PAIRING_POLL_INTERVAL_MS));
+    const response = await fetch(`/api/pairing/${encodeURIComponent(pairingId)}`);
+    if (response.status === 404) {
+      throw new Error("That connection request expired. Try again.");
+    }
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, "Connection failed."));
+    }
+    const payload = await response.json();
+    if (payload.approval_code) {
+      setPairingApprovalCode(payload.approval_code);
+    }
+    if (payload.status === "approved" && payload.access_token) {
+      return payload.access_token;
+    }
+    if (payload.status === "expired") {
+      throw new Error(payload.message || "That connection request expired. Try again.");
+    }
+    if (payload.message) {
+      setConnectStatus(payload.message);
+    }
+  }
+  throw new Error("Timed out waiting for PC approval. Ask the PC owner to approve your device and try again.");
+}
+
+function stopPairingPolling() {
+  if (state.pairingPollTimer) {
+    window.clearInterval(state.pairingPollTimer);
+    state.pairingPollTimer = null;
+  }
+}
+
+async function connectPhone() {
+  if (state.connectInFlight) {
     return;
   }
 
-  state.pairingRequestInFlight = true;
-  syncPairingControls();
-  try {
-    const response = await apiFetch(`/api/pairing/${encodeURIComponent(state.pairingRequestId)}/approve`, {
-      method: "POST",
-    });
-    const connected = await applyPairingResponse(response);
-    if (!connected && state.pairingRequestId) {
-      startPairingPolling();
-    }
-  } finally {
-    state.pairingRequestInFlight = false;
-    syncPairingControls();
+  if (!state.connectCode) {
+    showToast("Could not load the connect code from this PC.");
+    beginConnectFlow();
+    return;
   }
+
+  state.connectInFlight = true;
+  state.pairingApprovalCode = null;
+  setConnectStatus("Connecting to this PC...");
+  syncConnectControls();
+  try {
+    const deviceName = getPairingDeviceName();
+    const response = await fetch("/api/pairing/request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        device_name: deviceName,
+        connect_code: state.connectCode,
+      }),
+    });
+    if (response.status === 403) {
+      throw new Error(await readErrorMessage(response, "Connect code did not match. Check the code on your PC."));
+    }
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, "Connection failed."));
+    }
+    const payload = await response.json();
+    if (payload.approval_code) {
+      setPairingApprovalCode(payload.approval_code);
+    }
+    if (payload.access_token) {
+      await finishPairing(payload.access_token);
+      showToast("Connected to your PC.");
+      return;
+    }
+    if (payload.status === "pending" && payload.pairing_id) {
+      const accessToken = await waitForPcApproval(payload.pairing_id, payload.device_name, payload.approval_code);
+      await finishPairing(accessToken);
+      showToast("Connected to your PC.");
+      return;
+    }
+    throw new Error(payload.message || "Connection failed.");
+  } catch (error) {
+    setConnectStatus("Confirm the session code matches your PC, then tap Connect.");
+    showToast(error.message || "Connection failed.");
+    beginConnectFlow();
+  } finally {
+    state.connectInFlight = false;
+    syncConnectControls();
+  }
+}
+
+function beginConnectFlow({ statusMessage = null } = {}) {
+  applyInjectedConnectCode();
+  state.pairingApprovalCode = null;
+  syncPairingDeviceNameInput();
+  if (statusMessage) {
+    setConnectStatus(statusMessage);
+  } else if (!state.connectCode) {
+    setConnectStatus("Loading connect code from your PC...");
+  } else {
+    setConnectStatus("Confirm the session code matches your PC, then tap Connect.");
+  }
+  void loadConnectInfo({ quiet: !state.connectCode });
+  startConnectInfoPolling();
 }
 
 function loadSavedToken() {
-  elements.pairingDeviceName.value = getDefaultPairingDeviceName();
-  setPairingStatus();
-  syncPairingControls();
-
   const token = window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
   if (!token) {
     elements.authPanel.classList.remove("hidden");
+    beginConnectFlow();
     return;
   }
 
   state.token = token;
   elements.authPanel.classList.add("hidden");
-
   bootstrap();
 }
 
@@ -1124,14 +1242,12 @@ async function bootstrap({ quiet = false } = {}) {
     clearHostReconnectPolling();
     return true;
   } catch (error) {
-    if (error.message === "Approve this phone on both devices to connect.") {
+    if (error.message === "Connect your phone to use PC Phone Link.") {
       state.token = null;
       window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
-      elements.statusPill.textContent = "Approval needed";
+      elements.statusPill.textContent = "Connect needed";
       elements.authPanel.classList.remove("hidden");
-      clearPairingRequest({
-        message: "Send a connection request to this PC, then approve it on both devices to pair this browser.",
-      });
+      beginConnectFlow();
     } else if (!quiet) {
       elements.statusPill.textContent = "Connection lost";
     }
@@ -1263,7 +1379,9 @@ async function deleteTrustedDevice(device) {
     state.trustedDevices = [];
     window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
     elements.authPanel.classList.remove("hidden");
-    clearPairingRequest({ message: "That saved connection was deleted. Pair this phone again to reconnect." });
+    beginConnectFlow({
+      statusMessage: "That saved connection was deleted. Connect this phone again.",
+    });
     renderTrustedDevices();
     resetViewer();
     return;
@@ -1296,7 +1414,7 @@ async function apiFetch(path, options = {}) {
 
   if (response.status === 401) {
     elements.authPanel.classList.remove("hidden");
-    throw new Error(await readErrorMessage(response, "Approve this phone on both devices to connect."));
+    throw new Error(await readErrorMessage(response, "Connect your phone to use PC Phone Link."));
   }
 
   if (!response.ok) {
@@ -2825,16 +2943,16 @@ function handleTextSubmit(event) {
   sendComposedText().catch((error) => showToast(error.message));
 }
 
-elements.authForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  try {
-    await requestPairing();
-  } catch (error) {
-    showToast(error.message || "Connection failed.");
-  }
-});
+if (elements.pairingDeviceName) {
+  elements.pairingDeviceName.addEventListener("input", () => {
+    state.pairingDeviceName = normalizePairingDeviceName(elements.pairingDeviceName.value);
+  });
+  elements.pairingDeviceName.addEventListener("change", () => {
+    window.localStorage.setItem(PAIRING_DEVICE_NAME_STORAGE_KEY, syncPairingDeviceNameInput());
+  });
+}
 
-elements.approvePairing.addEventListener("click", () => approvePairingOnPhone().catch((error) => showToast(error.message)));
+elements.connectButton.addEventListener("click", () => connectPhone().catch((error) => showToast(error.message)));
 
 elements.toggleDrawer.addEventListener("click", toggleDrawer);
 elements.refreshWindows.addEventListener("click", () => refreshWindows().catch((error) => showToast(error.message)));

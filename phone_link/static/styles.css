@@ -576,6 +576,38 @@ button.mode-active {
   line-height: 1.5;
 }
 
+.device-name-field {
+  display: grid;
+  gap: 0.45rem;
+  color: #9bb0d8;
+  font-size: 0.9rem;
+}
+
+.device-name-field input {
+  color: #f8faff;
+}
+
+.approval-code-block {
+  display: grid;
+  gap: 0.35rem;
+  color: #9bb0d8;
+  font-size: 0.9rem;
+}
+
+.approval-code-block[hidden] {
+  display: none;
+}
+
+.connect-code {
+  margin: 0;
+  font-size: 2.5rem;
+  font-weight: 700;
+  letter-spacing: 0.35rem;
+  text-align: center;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+}
+
 .auth-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

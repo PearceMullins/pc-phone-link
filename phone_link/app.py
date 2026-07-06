@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import hashlib
 import ctypes
-import secrets
-import socket
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -16,14 +14,22 @@ from typing import Any
 import pywintypes
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .connect import (
+    approve_pairing,
+    build_connect_info,
+    generate_connect_code,
+    get_pairing,
+    list_pending_pairings,
+    regenerate_connect_code,
+    request_pairing,
+    serialize_pairing_for_client,
+)
 from .host_access import (
     load_paired_browsers,
-    register_paired_browser,
-    resolve_access_token,
     save_paired_browsers,
     touch_paired_browser,
 )
@@ -49,7 +55,6 @@ from .windows_host import (
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
-PAIRING_REQUEST_TTL_SECONDS = 300
 
 
 class ActivateRequest(BaseModel):
@@ -89,6 +94,11 @@ class TextSizeRequest(BaseModel):
 
 class PairingRequest(BaseModel):
     device_name: str | None = None
+    connect_code: str
+
+
+class PairingApproveRequest(BaseModel):
+    approval_code: str
 
 
 class ClientLogEntry(BaseModel):
@@ -102,11 +112,13 @@ class ClientLogRequest(BaseModel):
     entries: list[ClientLogEntry] = Field(default_factory=list)
 
 
-def create_app(access_token: str, default_fps: int = 20, wake_relay_url: str | None = None) -> FastAPI:
+def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | None = None) -> FastAPI:
     app = FastAPI(title="PC Phone Link", docs_url=None, redoc_url=None)
-    app.state.access_token = access_token
+    app.state.connect_code = connect_code
     app.state.paired_browsers = load_paired_browsers()
     app.state.pending_pairings = {}
+    app.state.gui_enabled = True
+    app.state.pc_connect_ready = False
     app.state.default_fps = max(1, min(default_fps, MAX_STREAM_FPS))
     app.state.wake_relay_url = _normalize_wake_relay_url(wake_relay_url)
 
@@ -168,49 +180,38 @@ def create_app(access_token: str, default_fps: int = 20, wake_relay_url: str | N
     app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
     @app.get("/")
-    async def root() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html")
+    async def root() -> HTMLResponse:
+        return HTMLResponse(content=_render_index_html(app), media_type="text/html")
+
+    @app.get("/api/connect-info")
+    async def connect_info() -> dict[str, str]:
+        return build_connect_info(app)
 
     @app.post("/api/pairing/request")
-    async def request_pairing(payload: PairingRequest, request: Request) -> dict[str, Any]:
-        _cleanup_expired_pairings(app)
-        device_name = _normalize_pairing_device_name(payload.device_name)
-        pairing = _find_pending_pairing(app, device_name, request)
-        if pairing is None:
-            pairing = _create_pairing(request, device_name)
-            app.state.pending_pairings[pairing["id"]] = pairing
-            asyncio.create_task(_prompt_pc_pairing(app, pairing["id"]))
-            log_event(
-                "host",
-                "pairing-request-created",
-                {
-                    "pairing_id": pairing["id"],
-                    "device_name": device_name,
-                    "remote_address": pairing["remote_address"],
-                },
-            )
-        return _serialize_pairing(app, pairing)
+    async def pairing_request(payload: PairingRequest, request: Request) -> dict[str, Any]:
+        return request_pairing(app, request, payload.device_name or "", payload.connect_code)
+
+    @app.get("/api/pairing/pending")
+    async def pairing_pending(request: Request) -> dict[str, Any]:
+        _require_localhost(request)
+        return {"pairings": list_pending_pairings(app)}
+
+    @app.post("/api/pairing/{pairing_id}/approve")
+    async def pairing_approve(
+        pairing_id: str,
+        payload: PairingApproveRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        _require_localhost(request)
+        return approve_pairing(app, pairing_id, payload.approval_code)
 
     @app.get("/api/pairing/{pairing_id}")
     async def pairing_status(pairing_id: str) -> dict[str, Any]:
-        _cleanup_expired_pairings(app)
-        pairing = _get_pairing(app, pairing_id)
-        return _serialize_pairing(app, pairing)
-
-    @app.post("/api/pairing/{pairing_id}/approve")
-    async def approve_pairing(pairing_id: str) -> dict[str, Any]:
-        _cleanup_expired_pairings(app)
-        pairing = _get_pairing(app, pairing_id)
-        if _pairing_status(pairing) == "expired":
-            raise HTTPException(status_code=410, detail="This connection request expired. Send a new one.")
-        pairing["phone_approved"] = True
-        pairing["phone_approved_at"] = time.time()
-        log_event(
-            "host",
-            "pairing-phone-approved",
-            {"pairing_id": pairing_id, "device_name": pairing["device_name"]},
-        )
-        return _serialize_pairing(app, pairing)
+        pairing = get_pairing(app, pairing_id)
+        result = serialize_pairing_for_client(app, pairing)
+        if result.get("status") == "approved":
+            regenerate_connect_code(app)
+        return result
 
     @app.get("/api/info")
     async def info(request: Request) -> dict[str, Any]:
@@ -221,7 +222,7 @@ def create_app(access_token: str, default_fps: int = 20, wake_relay_url: str | N
             log_event("host", "text-size-read-failed", {"error": error}, level="error")
             text_scale = None
         return {
-            "device_name": socket.gethostname(),
+            "device_name": build_connect_info(app)["device_name"],
             "default_fps": app.state.default_fps,
             "text_scale": text_scale,
             "wake_relay_url": app.state.wake_relay_url,
@@ -477,7 +478,7 @@ def create_app(access_token: str, default_fps: int = 20, wake_relay_url: str | N
     async def input_socket(websocket: WebSocket) -> None:
         token = websocket.query_params.get("token")
         websocket_details = summarize_websocket(websocket)
-        if token != app.state.access_token:
+        if not _paired_token_allowed(app, token):
             log_event("host", "websocket-rejected", websocket_details, level="error")
             await websocket.close(code=4401)
             return
@@ -552,30 +553,34 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run the PC Phone Link host app.")
     parser.add_argument("--host", default="0.0.0.0", help="Host interface to bind to.")
     parser.add_argument("--port", type=int, default=8765, help="Port to listen on.")
-    parser.add_argument("--token", default=None, help="Optional access token shown to the phone.")
     parser.add_argument("--fps", type=int, default=20, help="Default stream FPS.")
     parser.add_argument(
         "--wake-relay-url",
         default=None,
         help=(
             "Optional full Wake-on-LAN relay endpoint used by the browser Power on button, "
-            "for example http://192.168.1.10:8780/api/wake?token=ABCD-EFGH"
+            "for example http://192.168.1.10:8780/"
         ),
+    )
+    parser.add_argument(
+        "--no-gui",
+        action="store_true",
+        help="Run without the Windows desktop connect-code window.",
     )
     args = parser.parse_args()
 
-    access_token = resolve_access_token(args.token)
+    connect_code = generate_connect_code()
     wake_relay_url = _normalize_wake_relay_url(args.wake_relay_url)
     access_urls = discover_access_urls(args.port)
 
-    if _check_host_online(args.port, access_token):
+    if _check_host_online(args.port):
         print("=" * 72)
         print("PC Phone Link host is already running")
         print("=" * 72)
         print("Open one of these URLs on your phone:")
         for url in access_urls:
             print(f"  {url}")
-        print("Approve the connection request on both the phone and this PC to pair that browser.")
+        print("Check the running instance for the connect code shown in its desktop window or terminal.")
         print("No new host instance was started because the current one is already online.")
         print("=" * 72)
         log_event(
@@ -589,7 +594,10 @@ def main() -> int:
         )
         return 0
 
-    app = create_app(access_token=access_token, default_fps=args.fps, wake_relay_url=wake_relay_url)
+    app = create_app(connect_code=connect_code, default_fps=args.fps, wake_relay_url=wake_relay_url)
+    app.state.access_urls = access_urls
+    app.state.port = args.port
+    app.state.gui_enabled = not args.no_gui
 
     print("=" * 72)
     print("PC Phone Link host is running")
@@ -597,7 +605,9 @@ def main() -> int:
     print("Open one of these URLs on your phone:")
     for url in access_urls:
         print(f"  {url}")
-    print("Approve the connection request on both the phone and this PC to pair that browser.")
+    print(f"Connect code: {connect_code}")
+    if not args.no_gui:
+        print("The connect code is also shown in the PC Phone Link desktop window.")
     if wake_relay_url:
         print("Power on from the phone will use this wake relay endpoint:")
         print(f"  {wake_relay_url}")
@@ -613,19 +623,52 @@ def main() -> int:
             "wake_relay_url": wake_relay_url,
             "wake_relay_configured": bool(wake_relay_url),
             "access_urls": access_urls,
+            "gui_enabled": not args.no_gui,
         },
     )
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+
+    if args.no_gui:
+        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+        return 0
+
+    from .desktop_gui import run_desktop_gui
+
+    server_thread = threading.Thread(
+        target=uvicorn.run,
+        args=(app,),
+        kwargs={"host": args.host, "port": args.port, "log_level": "info"},
+        daemon=True,
+    )
+    server_thread.start()
+    if not _wait_for_host_ready(args.port, timeout_seconds=10.0):
+        print("Warning: the host server did not become ready before opening the desktop window.")
+    run_desktop_gui(app)
     return 0
 
 
-def _check_host_online(target_port: int, access_token: str, timeout: float = 1.2) -> bool:
+def _render_index_html(app: FastAPI) -> str:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    connect_code = str(getattr(app.state, "connect_code", "") or "")
+    injection = f'<script>window.__PC_PHONE_LINK_CONNECT_CODE__ = "{connect_code}";</script>\n  '
+    marker = '<script src="/assets/app.js'
+    if marker in html:
+        return html.replace(marker, injection + marker, 1)
+    return html + injection
+
+
+def _wait_for_host_ready(target_port: int, timeout_seconds: float = 10.0) -> bool:
+    deadline = time.perf_counter() + max(timeout_seconds, 0.0)
+    while time.perf_counter() < deadline:
+        if _check_host_online(target_port, timeout=0.5):
+            return True
+        time.sleep(0.25)
+    return False
+
+
+def _check_host_online(target_port: int, timeout: float = 1.2) -> bool:
     request = urllib.request.Request(
-        f"http://127.0.0.1:{target_port}/api/info",
-        headers={
-            "User-Agent": "PC-Phone-Link-Host",
-            "X-Access-Token": access_token,
-        },
+        f"http://127.0.0.1:{target_port}/api/connect-info",
+        headers={"User-Agent": "PC-Phone-Link-Host"},
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -786,20 +829,37 @@ def _sleep_computer() -> None:
     raise OSError("Windows did not accept the sleep request.")
 
 
+def _require_localhost(request: Request) -> None:
+    client = request.client
+    if client is None:
+        raise HTTPException(status_code=403, detail="This action is only available on the PC.")
+    host = str(client.host or "").strip().lower()
+    if host not in {"127.0.0.1", "::1", "localhost"}:
+        raise HTTPException(status_code=403, detail="This action is only available on the PC.")
+
+
 def _require_token(app: FastAPI, request: Request) -> str:
     provided = request.headers.get("X-Access-Token") or request.query_params.get("token")
     if not provided:
-        raise HTTPException(status_code=401, detail="Approve this phone on both devices to connect.")
-
-    if provided == app.state.access_token:
-        return provided
+        raise HTTPException(status_code=401, detail="Connect your phone to use PC Phone Link.")
 
     for entry in app.state.paired_browsers:
         if str(entry.get("token", "")).strip() == provided:
             touch_paired_browser(app.state.paired_browsers, provided)
             return provided
 
-    raise HTTPException(status_code=401, detail="Approve this phone on both devices to connect.")
+    raise HTTPException(status_code=401, detail="Connect your phone to use PC Phone Link.")
+
+
+def _paired_token_allowed(app: FastAPI, provided: str | None) -> bool:
+    token = (provided or "").strip()
+    if not token:
+        return False
+    for entry in app.state.paired_browsers:
+        if str(entry.get("token", "")).strip() == token:
+            touch_paired_browser(app.state.paired_browsers, token)
+            return True
+    return False
 
 
 def _trusted_device_id(token: str) -> str:
@@ -815,178 +875,6 @@ def _serialize_trusted_device(entry: dict[str, Any], current_token: str) -> dict
         "last_seen_at": str(entry.get("last_seen_at", "")).strip(),
         "is_current": token == current_token,
     }
-
-
-def _cleanup_expired_pairings(app: FastAPI) -> None:
-    now = time.time()
-    expired_pairing_ids = [
-        pairing_id
-        for pairing_id, pairing in app.state.pending_pairings.items()
-        if now >= float(pairing.get("expires_at", 0))
-    ]
-    for pairing_id in expired_pairing_ids:
-        app.state.pending_pairings.pop(pairing_id, None)
-
-
-def _normalize_pairing_device_name(device_name: str | None) -> str:
-    normalized = (device_name or "").strip()
-    return normalized[:80] or "This phone"
-
-
-def _create_pairing(request: Request, device_name: str) -> dict[str, Any]:
-    now = time.time()
-    return {
-        "id": secrets.token_urlsafe(24),
-        "device_name": device_name,
-        "remote_address": request.client.host if request.client else None,
-        "created_at": now,
-        "expires_at": now + PAIRING_REQUEST_TTL_SECONDS,
-        "pc_state": "pending",
-        "phone_approved": False,
-        "phone_approved_at": None,
-        "approved_token": None,
-    }
-
-
-def _find_pending_pairing(app: FastAPI, device_name: str, request: Request) -> dict[str, Any] | None:
-    remote_address = request.client.host if request.client else None
-    for pairing in app.state.pending_pairings.values():
-        if pairing.get("device_name") != device_name:
-            continue
-        if pairing.get("remote_address") != remote_address:
-            continue
-        if _pairing_status(pairing) in {"pending-both", "pending-pc", "pending-phone", "approved"}:
-            return pairing
-    return None
-
-
-def _get_pairing(app: FastAPI, pairing_id: str) -> dict[str, Any]:
-    pairing = app.state.pending_pairings.get(pairing_id)
-    if pairing is None:
-        raise HTTPException(status_code=404, detail="That connection request was not found.")
-    return pairing
-
-
-def _pairing_status(pairing: dict[str, Any]) -> str:
-    if time.time() >= float(pairing.get("expires_at", 0)):
-        return "expired"
-    if pairing.get("approved_token"):
-        return "approved"
-    if pairing.get("pc_state") == "rejected":
-        return "rejected"
-    if pairing.get("phone_approved") and pairing.get("pc_state") == "approved":
-        return "approved"
-    if pairing.get("phone_approved"):
-        return "pending-pc"
-    if pairing.get("pc_state") == "approved":
-        return "pending-phone"
-    return "pending-both"
-
-
-def _complete_pairing_if_ready(app: FastAPI, pairing: dict[str, Any]) -> None:
-    if pairing.get("approved_token"):
-        return
-    if not pairing.get("phone_approved"):
-        return
-    if pairing.get("pc_state") != "approved":
-        return
-
-    browser_entry = register_paired_browser(pairing.get("device_name") or "This phone")
-    pairing["approved_token"] = browser_entry["token"]
-    app.state.paired_browsers = [
-        entry
-        for entry in app.state.paired_browsers
-        if str(entry.get("token", "")).strip() != browser_entry["token"]
-    ]
-    app.state.paired_browsers.append(browser_entry)
-    log_event(
-        "host",
-        "pairing-completed",
-        {
-            "pairing_id": pairing["id"],
-            "device_name": pairing["device_name"],
-            "remote_address": pairing.get("remote_address"),
-        },
-    )
-
-
-def _serialize_pairing(app: FastAPI, pairing: dict[str, Any]) -> dict[str, Any]:
-    _complete_pairing_if_ready(app, pairing)
-    status = _pairing_status(pairing)
-    expires_in = max(int(float(pairing.get("expires_at", 0)) - time.time()), 0)
-    return {
-        "pairing_id": pairing["id"],
-        "device_name": pairing["device_name"],
-        "status": status,
-        "phone_approved": bool(pairing.get("phone_approved")),
-        "pc_approved": pairing.get("pc_state") == "approved",
-        "expires_in_seconds": expires_in,
-        "message": _pairing_message(status, pairing),
-        "access_token": pairing.get("approved_token") if status == "approved" else None,
-    }
-
-
-def _pairing_message(status: str, pairing: dict[str, Any]) -> str:
-    if status == "approved":
-        return f"{pairing['device_name']} is approved. Connecting now."
-    if status == "pending-phone":
-        return "The PC approved this request. Tap Approve on this phone to finish."
-    if status == "pending-pc":
-        return "This phone is approved. Finish the request on the PC."
-    if status == "rejected":
-        return "The PC rejected that connection request. Send a new one when you are ready."
-    if status == "expired":
-        return "That connection request expired. Send a new one."
-    return "Approve this request on the PC, then tap Approve on this phone."
-
-
-async def _prompt_pc_pairing(app: FastAPI, pairing_id: str) -> None:
-    pairing = app.state.pending_pairings.get(pairing_id)
-    if pairing is None:
-        return
-    if pairing.get("pc_state") != "pending":
-        return
-
-    approved = await asyncio.to_thread(
-        _show_pairing_prompt,
-        pairing.get("device_name") or "This phone",
-        pairing.get("remote_address"),
-    )
-
-    pairing = app.state.pending_pairings.get(pairing_id)
-    if pairing is None:
-        return
-    if _pairing_status(pairing) == "expired":
-        return
-    if pairing.get("pc_state") != "pending":
-        return
-
-    pairing["pc_state"] = "approved" if approved else "rejected"
-    log_event(
-        "host",
-        "pairing-pc-decided",
-        {
-            "pairing_id": pairing_id,
-            "device_name": pairing.get("device_name"),
-            "approved": approved,
-        },
-    )
-
-
-def _show_pairing_prompt(device_name: str, remote_address: str | None) -> bool:
-    user32 = ctypes.WinDLL("user32", use_last_error=True)
-    message_box = user32.MessageBoxW
-    message_box.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
-    message_box.restype = ctypes.c_int
-
-    source_text = remote_address or "Unknown network address"
-    message = (
-        f"{device_name} wants to connect to PC Phone Link.\n\n"
-        f"Source: {source_text}\n\n"
-        "Approve here, then approve on the phone to finish pairing this browser."
-    )
-    dialog_style = 0x00000001 | 0x00000040 | 0x00001000 | 0x00040000 | 0x00010000
-    return message_box(None, message, "PC Phone Link pairing request", dialog_style) == 1
 
 
 def _handle_window_action(callback: Any) -> None:

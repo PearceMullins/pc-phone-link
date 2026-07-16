@@ -6,6 +6,30 @@ All notable changes to PC Phone Link are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Touch-first PWA shell with safe offline fallback and update handling on trusted secure origins; accurate home-screen shortcut guidance on LAN HTTP
+- Mobile Viewer, Windows, Keyboard, Controls, and Settings navigation
+- Two-finger scroll, centered pinch zoom, long-press right-click, haptics, cancellation safety, connection state, gesture help, and immersive viewer reveal
+- Privacy-filtered, rotating gesture diagnostics spanning phone recognition, API dispatch, and Windows touch injection
+
+### Changed
+
+- **Gesture arbitration** â€” One-finger drag pans only the zoomed viewer; two-finger scroll requires a deliberate hold and Scroll ready acknowledgement; clear pinch stays immediate and mode-locked; tap remains direct click
+- **Native touch reliability** — Release and cancel frames reuse Windows-required prior coordinates, press-and-hold sends keepalive updates, failed contacts reset cleanly, and cursor guard survives rapid gesture bursts
+- **Mobile reliability polish** — Added gesture acknowledgement, recent-app ordering, keyboard shortcut row, and automatic reconnect recovery
+- **Stable Viewer** — Successful window activation opens Viewer; passive cursor/window/stream updates, reconnects, keyboard changes, and viewport changes preserve camera focus, zoom, and PC window geometry
+- **iPad parity** — Coarse-pointer tablets through common iPad Pro landscape sizes use the same bottom navigation and sheets as phones; Settings now includes accessible power controls
+
+- **Control styles** — App touch injects native Windows touch without moving mouse; Mouse trackpad remains available with speed and follow-mouse settings
+- **Breaking:** Removed persistent access codes and the dual-port launcher/host flow — one URL on port **8765** serves the full control experience
+- **Dual Connect pairing** — Each phone gets its own approval code on the PC; approve only the devices you want to allow
+- **Connect code pairing** — Phone shows a Connect button with a code that must match the PC before connecting
+- **Wake relay** — Uses the same connect-code model with session tokens instead of wake access codes
+- **Startup shortcut** — Installs the host directly instead of the launcher
+
 ## [1.0.0] - 2026-07-04
 
 ### Added

@@ -8,18 +8,16 @@ from pathlib import Path
 import win32com.client
 
 from .logging_utils import log_event
-from .runtime_paths import app_root, is_frozen, launcher_executable, launcher_startup_arguments
+from .runtime_paths import app_root, host_executable, host_startup_arguments, is_frozen
 
 APP_ROOT = Path(__file__).resolve().parent.parent
-STARTUP_SHORTCUT_NAME = "PC Phone Link Launcher.lnk"
+STARTUP_SHORTCUT_NAME = "PC Phone Link.lnk"
+LEGACY_STARTUP_SHORTCUT_NAME = "PC Phone Link Launcher.lnk"
 
 
 def install_startup_shortcut(
-    token: str | None = None,
-    launcher_host: str = "0.0.0.0",
-    launcher_port: int = 8764,
-    target_host: str = "0.0.0.0",
-    target_port: int = 8765,
+    host_bind: str = "0.0.0.0",
+    port: int = 8765,
     default_fps: int = 20,
     wake_relay_url: str | None = None,
     startup_dir: Path | None = None,
@@ -29,11 +27,8 @@ def install_startup_shortcut(
         "startup",
         "install-startup-shortcut-requested",
         {
-            "token_provided": bool(token),
-            "launcher_host": launcher_host,
-            "launcher_port": launcher_port,
-            "target_host": target_host,
-            "target_port": target_port,
+            "host_bind": host_bind,
+            "port": port,
             "default_fps": default_fps,
             "wake_relay_configured": bool(wake_relay_url),
             "startup_dir": startup_dir,
@@ -48,12 +43,9 @@ def install_startup_shortcut(
     shortcut = shell.CreateShortCut(str(shortcut_path))
     target_path = resolve_startup_target()
     shortcut.TargetPath = str(target_path)
-    shortcut.Arguments = _build_launcher_arguments(
-        token=token,
-        launcher_host=launcher_host,
-        launcher_port=launcher_port,
-        target_host=target_host,
-        target_port=target_port,
+    shortcut.Arguments = _build_host_arguments(
+        host_bind=host_bind,
+        port=port,
         default_fps=default_fps,
         wake_relay_url=wake_relay_url,
     )
@@ -83,7 +75,16 @@ def remove_startup_shortcut(startup_dir: Path | None = None) -> Path | None:
 
     destination_dir = Path(startup_dir) if startup_dir else get_startup_directory()
     shortcut_path = destination_dir / STARTUP_SHORTCUT_NAME
+    legacy_shortcut_path = destination_dir / LEGACY_STARTUP_SHORTCUT_NAME
     if not shortcut_path.exists():
+        if legacy_shortcut_path.exists():
+            legacy_shortcut_path.unlink()
+            log_event(
+                "startup",
+                "startup-shortcut-removed",
+                {"shortcut_path": legacy_shortcut_path, "legacy": True},
+            )
+            return legacy_shortcut_path
         log_event(
             "startup",
             "startup-shortcut-missing",
@@ -111,7 +112,7 @@ def resolve_startup_target() -> Path:
     _require_windows()
 
     if is_frozen():
-        executable = launcher_executable()
+        executable = host_executable()
         if executable.is_file():
             log_event(
                 "startup",
@@ -144,21 +145,15 @@ def resolve_startup_python() -> Path:
     return resolve_startup_target()
 
 
-def _build_launcher_arguments(
-    token: str | None,
-    launcher_host: str,
-    launcher_port: int,
-    target_host: str,
-    target_port: int,
+def _build_host_arguments(
+    host_bind: str,
+    port: int,
     default_fps: int,
     wake_relay_url: str | None,
 ) -> str:
-    command = launcher_startup_arguments(
-        token=token,
-        launcher_host=launcher_host,
-        launcher_port=launcher_port,
-        target_host=target_host,
-        target_port=target_port,
+    command = host_startup_arguments(
+        host_bind=host_bind,
+        port=port,
         default_fps=default_fps,
         wake_relay_url=wake_relay_url,
     )

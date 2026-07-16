@@ -14,7 +14,7 @@ cd "c:\PC Phone Link"
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-python run_phone_link_launcher.py --host 0.0.0.0 --port 8764 --target-port 8765
+python run_phone_link.py --host 0.0.0.0 --port 8765
 ```
 
 ## Before submitting a pull request

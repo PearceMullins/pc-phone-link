@@ -1,20 +1,22 @@
 const state = {
   token: null,
+  connectCode: null,
+  connectInFlight: false,
   controlUrl: null,
-  controlStartConfigured: false,
   pollTimer: null,
   pollAttempts: 0,
-  startingControls: false,
 };
 
+const SESSION_TOKEN_STORAGE_KEY = "pc-phone-link-wake-token";
+
 const elements = {
-  authForm: document.getElementById("authForm"),
   authPanel: document.getElementById("authPanel"),
-  authToken: document.getElementById("authToken"),
   checkStatus: document.getElementById("checkStatus"),
+  connectButton: document.getElementById("connectButton"),
+  connectCodeDisplay: document.getElementById("connectCodeDisplay"),
+  connectStatus: document.getElementById("connectStatus"),
   controlHint: document.getElementById("controlHint"),
   openControls: document.getElementById("openControls"),
-  startControls: document.getElementById("startControls"),
   statusPill: document.getElementById("statusPill"),
   toast: document.getElementById("toast"),
   wakeButton: document.getElementById("wakeButton"),
@@ -22,6 +24,10 @@ const elements = {
 
 function setStatus(message) {
   elements.statusPill.textContent = message;
+}
+
+function setConnectStatus(message) {
+  elements.connectStatus.textContent = message || "Confirm this code matches the wake relay terminal:";
 }
 
 function showToast(message) {
@@ -51,9 +57,32 @@ function updateControlLink(controlUrl, online) {
   elements.openControls.classList.add("hidden");
 }
 
-function updateStartButton() {
-  elements.startControls.disabled = !state.controlStartConfigured || state.startingControls;
-  elements.startControls.textContent = state.startingControls ? "Starting..." : "Start controls";
+function syncConnectControls() {
+  const code = state.connectCode || "----";
+  if (elements.connectCodeDisplay) {
+    elements.connectCodeDisplay.textContent = code;
+  }
+  if (elements.connectButton) {
+    elements.connectButton.disabled = state.connectInFlight || !state.connectCode;
+    elements.connectButton.textContent = state.connectInFlight ? "Connecting..." : `Connect · ${code}`;
+  }
+}
+
+async function loadConnectInfo() {
+  try {
+    const response = await fetch("/api/connect-info");
+    if (!response.ok) {
+      throw new Error("Could not load the connect code from this relay.");
+    }
+    const payload = await response.json();
+    state.connectCode = payload.connect_code || null;
+    syncConnectControls();
+    return Boolean(state.connectCode);
+  } catch (error) {
+    setConnectStatus(error.message || "Could not load the connect code from this relay.");
+    syncConnectControls();
+    return false;
+  }
 }
 
 async function apiFetch(path, options = {}) {
@@ -70,7 +99,7 @@ async function apiFetch(path, options = {}) {
 
   if (response.status === 401) {
     elements.authPanel.classList.remove("hidden");
-    throw new Error("Access code rejected.");
+    throw new Error("Connect this phone to use the wake relay.");
   }
 
   if (!response.ok) {
@@ -87,18 +116,52 @@ async function apiFetch(path, options = {}) {
   return response.json();
 }
 
+async function connectPhone() {
+  if (state.connectInFlight) {
+    return;
+  }
+
+  state.connectInFlight = true;
+  setConnectStatus("Connecting to this relay...");
+  syncConnectControls();
+  try {
+    const response = await fetch("/api/connect", { method: "POST" });
+    if (!response.ok) {
+      let message = "Connection failed.";
+      try {
+        const payload = await response.json();
+        message = payload.detail || message;
+      } catch {
+        message = response.statusText || message;
+      }
+      throw new Error(message);
+    }
+    const payload = await response.json();
+    if (!payload.session_token) {
+      throw new Error("Connection failed.");
+    }
+    state.token = payload.session_token;
+    window.localStorage.setItem(SESSION_TOKEN_STORAGE_KEY, payload.session_token);
+    elements.authPanel.classList.add("hidden");
+    await bootstrap();
+    showToast("Connected to the wake relay.");
+  } catch (error) {
+    setConnectStatus("Confirm this code matches the wake relay terminal:");
+    showToast(error.message || "Connection failed.");
+    await loadConnectInfo();
+  } finally {
+    state.connectInFlight = false;
+    syncConnectControls();
+  }
+}
+
 async function checkStatus() {
   if (!state.token) {
     return false;
   }
 
   const payload = await apiFetch("/api/control-status");
-  state.controlStartConfigured = Boolean(payload.control_start_configured);
   updateControlLink(payload.control_url, payload.online);
-  if (payload.online) {
-    state.startingControls = false;
-  }
-  updateStartButton();
 
   if (payload.online) {
     setStatus("PC is ready");
@@ -106,26 +169,12 @@ async function checkStatus() {
     return true;
   }
 
-  if (state.startingControls) {
-    setStatus("Starting controls");
-    elements.controlHint.textContent = "The relay asked the launcher to start the main control server.";
-    return false;
-  }
-
-  if (payload.configured && state.controlStartConfigured) {
-    setStatus("Controls are offline");
-    elements.controlHint.textContent = "Wake the PC if needed, then tap Start controls whenever you want the main phone controls online.";
-    return false;
-  }
-
   if (payload.configured) {
     setStatus("PC is still waking");
     elements.controlHint.textContent = "When the PC answers again, this page can send you back to the main control screen.";
   } else {
     setStatus("Wake sent");
-    elements.controlHint.textContent = state.controlStartConfigured
-      ? "Wake packets are being sent. After the PC wakes, tap Start controls to bring the main phone controls online."
-      : "Wake packets are being sent. Open your main PC Phone Link page after the PC finishes starting.";
+    elements.controlHint.textContent = "Wake packets are being sent. Open your main PC Phone Link page after the PC finishes starting.";
   }
   return false;
 }
@@ -137,17 +186,11 @@ function startPolling() {
     checkStatus()
       .then((online) => {
         if (online || state.pollAttempts >= 30) {
-          if (!online) {
-            state.startingControls = false;
-            updateStartButton();
-          }
           stopPolling();
         }
       })
       .catch(() => {
         if (state.pollAttempts >= 30) {
-          state.startingControls = false;
-          updateStartButton();
           stopPolling();
           setStatus("Wake sent");
         }
@@ -157,19 +200,9 @@ function startPolling() {
 
 async function bootstrap() {
   const info = await apiFetch("/api/info");
-  state.controlStartConfigured = Boolean(info.control_start_configured);
-  updateStartButton();
-  elements.controlHint.textContent = info.control_start_configured
-    ? (
-        info.control_url_configured
-          ? "Wake the PC, then tap Start controls whenever you want the main phone controls online."
-          : "This relay can wake the PC and request the control server to start, but you still need a control URL configured for the Open PC controls link."
-      )
-    : (
-        info.control_url_configured
-          ? "When the PC answers again, this page can send you back to the main control screen."
-          : "This relay can wake the PC, but you still need to open your main control page manually if no control URL is configured."
-      );
+  elements.controlHint.textContent = info.control_url_configured
+    ? "When the PC answers again, this page can send you back to the main control screen."
+    : "This relay can wake the PC, but you still need to open your main control page manually if no control URL is configured.";
   updateControlLink(info.control_url, false);
 
   if (info.control_url_configured) {
@@ -197,91 +230,37 @@ async function wakePc() {
   setStatus("Wake sent");
 }
 
-async function startControls() {
-  if (!state.controlStartConfigured) {
-    showToast("This relay is not configured to start the control server.");
-    return;
-  }
-
-  state.startingControls = true;
-  updateStartButton();
-  setStatus("Starting controls");
-  elements.controlHint.textContent = "Asking the launcher to start the main control server.";
-  try {
-    await apiFetch("/api/control-start", { method: "POST" });
-  } catch (error) {
-    state.startingControls = false;
-    updateStartButton();
-    throw error;
-  }
-
-  showToast("Start request sent.");
-  if (state.controlUrl) {
-    startPolling();
-    return;
-  }
-
-  setStatus("Start requested");
-  elements.controlHint.textContent = "The launcher accepted the start request. Open your configured control page when it becomes available.";
-  state.startingControls = false;
-  updateStartButton();
-}
-
 function loadSavedToken() {
-  const urlToken = new URLSearchParams(window.location.search).get("token");
-  const storedToken = window.localStorage.getItem("pc-phone-link-wake-token");
-  const token = urlToken || storedToken;
+  const token = window.localStorage.getItem(SESSION_TOKEN_STORAGE_KEY);
   if (!token) {
     elements.authPanel.classList.remove("hidden");
+    void loadConnectInfo();
     return;
   }
 
   state.token = token;
-  elements.authToken.value = token;
   elements.authPanel.classList.add("hidden");
-  window.localStorage.setItem("pc-phone-link-wake-token", token);
-
-  if (urlToken) {
-    window.history.replaceState({}, "", window.location.pathname);
-  }
-
   bootstrap().catch((error) => {
-    setStatus("Auth needed");
+    state.token = null;
+    window.localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
+    elements.authPanel.classList.remove("hidden");
+    setStatus("Connect needed");
     showToast(error.message || "Connection failed.");
+    void loadConnectInfo();
   });
 }
 
-elements.authForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const token = elements.authToken.value.trim();
-  if (!token) {
-    return;
-  }
-
-  state.token = token;
-  window.localStorage.setItem("pc-phone-link-wake-token", token);
-  elements.authPanel.classList.add("hidden");
-  try {
-    await bootstrap();
-  } catch (error) {
-    setStatus("Auth needed");
-    showToast(error.message || "Connection failed.");
-  }
-});
+elements.connectButton.addEventListener("click", () => connectPhone().catch((error) => showToast(error.message)));
 
 elements.wakeButton.addEventListener("click", () => {
   wakePc().catch((error) => showToast(error.message));
-});
-
-elements.startControls.addEventListener("click", () => {
-  startControls().catch((error) => showToast(error.message));
 });
 
 elements.checkStatus.addEventListener("click", () => {
   checkStatus()
     .then((online) => {
       if (!online) {
-        showToast(state.controlStartConfigured ? "The PC controls are not ready yet." : "The PC is not answering yet.");
+        showToast("The PC is not answering yet.");
       }
     })
     .catch((error) => showToast(error.message));

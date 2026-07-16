@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import secrets
-import string
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -19,85 +18,15 @@ def _default_state_dir() -> Path:
     return base_path / "PC Phone Link"
 
 
-def _default_token_store_path() -> Path:
-    return _default_state_dir() / "access_token.txt"
-
-
 def _default_paired_browser_store_path() -> Path:
     return _default_state_dir() / "paired_browsers.json"
 
 
-TOKEN_STORE_PATH = _default_token_store_path()
 PAIRED_BROWSER_STORE_PATH = _default_paired_browser_store_path()
-
-
-def generate_access_token() -> str:
-    alphabet = string.ascii_uppercase + string.digits
-    return "-".join("".join(secrets.choice(alphabet) for _ in range(4)) for _ in range(2))
 
 
 def generate_browser_access_token() -> str:
     return secrets.token_urlsafe(24)
-
-
-def resolve_access_token(explicit_token: str | None) -> str:
-    if explicit_token:
-        token = explicit_token.strip().upper()
-        if not token:
-            raise ValueError("The access token cannot be empty.")
-        save_access_token(token)
-        log_event(
-            "host-access",
-            "token-resolved",
-            {"source": "explicit", "store_path": TOKEN_STORE_PATH},
-        )
-        return token
-
-    saved_token = load_saved_access_token()
-    if saved_token:
-        log_event(
-            "host-access",
-            "token-resolved",
-            {"source": "saved", "store_path": TOKEN_STORE_PATH},
-        )
-        return saved_token
-
-    generated_token = generate_access_token()
-    save_access_token(generated_token)
-    log_event(
-        "host-access",
-        "token-resolved",
-        {"source": "generated", "store_path": TOKEN_STORE_PATH},
-    )
-    return generated_token
-
-
-def load_saved_access_token() -> str | None:
-    if not TOKEN_STORE_PATH.is_file():
-        log_event(
-            "host-access",
-            "token-load-missed",
-            {"store_path": TOKEN_STORE_PATH},
-        )
-        return None
-
-    token = TOKEN_STORE_PATH.read_text(encoding="utf-8").strip().upper()
-    log_event(
-        "host-access",
-        "token-loaded",
-        {"store_path": TOKEN_STORE_PATH, "found": bool(token)},
-    )
-    return token or None
-
-
-def save_access_token(token: str) -> None:
-    TOKEN_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    TOKEN_STORE_PATH.write_text(token, encoding="utf-8")
-    log_event(
-        "host-access",
-        "token-saved",
-        {"store_path": TOKEN_STORE_PATH},
-    )
 
 
 def load_paired_browsers() -> list[dict[str, Any]]:
@@ -182,6 +111,35 @@ def register_paired_browser(device_name: str, *, token: str | None = None) -> di
         {"device_name": normalized_device_name},
     )
     return browser_entry
+
+
+def revoke_paired_browser(token: str) -> tuple[bool, dict[str, Any] | None]:
+    normalized_token = (token or "").strip()
+    if not normalized_token:
+        return False, None
+
+    paired_browsers = load_paired_browsers()
+    target_entry = None
+    for entry in paired_browsers:
+        if str(entry.get("token", "")).strip() == normalized_token:
+            target_entry = entry
+            break
+
+    if target_entry is None:
+        return False, None
+
+    remaining = [
+        entry
+        for entry in paired_browsers
+        if str(entry.get("token", "")).strip() != normalized_token
+    ]
+    save_paired_browsers(remaining)
+    log_event(
+        "host-access",
+        "paired-browser-revoked",
+        {"device_name": target_entry.get("device_name")},
+    )
+    return True, target_entry
 
 
 def touch_paired_browser(paired_browsers: list[dict[str, Any]], provided_token: str) -> bool:

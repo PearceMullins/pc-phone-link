@@ -26,27 +26,22 @@ python run_phone_link.py --host 0.0.0.0 --port 8765 --fps 12
 
 Optional flags:
 
-- `--token YOUR-CODE` — custom access token
-- `--wake-relay-url http://192.168.1.10:8780/api/wake?token=...`
+- `--wake-relay-url http://192.168.1.10:8780/`
 
-## Run the launcher (recommended)
+## Deprecated launcher entry point
 
-```powershell
-python run_phone_link_launcher.py --host 0.0.0.0 --port 8764 --target-port 8765 --fps 12
-```
-
-Add `--auto-start-host` to start the main host when the launcher starts (used by the startup shortcut installer).
+`run_phone_link_launcher.py` now runs the host directly and prints a deprecation notice. Prefer `run_phone_link.py`.
 
 ## Wake relay
 
 ```powershell
-python run_wake_relay.py --mac AA:BB:CC:DD:EE:FF --port 8780
+python run_wake_relay.py --mac AA:BB:CC:DD:EE:FF --port 8780 --control-url http://192.168.1.10:8765/
 ```
 
 ## Windows startup shortcut
 
 ```powershell
-python install_phone_link_startup.py --auto-start-host
+python install_phone_link_startup.py
 python remove_phone_link_startup.py
 ```
 
@@ -83,7 +78,7 @@ Output: `dist/PCPhoneLink/` with launcher and host executables.
 | Path | Role |
 | ---- | ---- |
 | `phone_link/app.py` | Main FastAPI host |
-| `phone_link/launcher.py` | Launcher service |
+| `phone_link/connect.py` | Connect code and simplified pairing |
 | `phone_link/windows_host.py` | Win32 capture and input |
 | `phone_link/streaming.py` | WebSocket and MJPEG streaming |
 | `phone_link/static/` | Phone control UI |
@@ -95,7 +90,6 @@ Output: `dist/PCPhoneLink/` with launcher and host executables.
 
 | Service | Default port |
 | ------- | ------------ |
-| Launcher | 8764 |
 | Host | 8765 |
 | Wake relay | 8780 |
 
@@ -105,7 +99,7 @@ Output: `dist/PCPhoneLink/` with launcher and host executables.
 %LOCALAPPDATA%\PC Phone Link\logs\
 ```
 
-Events are JSON lines with component names `host`, `launcher`, `wake-relay`, and `startup`.
+Events are JSON lines with component names `host`, `wake-relay`, and `startup`.
 
 ## Contributing
 

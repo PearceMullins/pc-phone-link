@@ -11,13 +11,14 @@ const state = {
   windows: [],
   mouseSpeed: 2.5,
   tapMode: "left",
-  controlMode: "trackpad",
+  controlMode: "touch",
+  controlsHidden: false,
+  currentDestination: "viewer",
+  recentWindowKeys: [],
   fitShape: "auto",
   trustedDevices: [],
   trustedDevicesLoading: false,
   phoneFitEnabled: false,
-  phoneFitOrientation: null,
-  phoneFitViewportSize: null,
   pointerDown: false,
   dragActive: false,
   pointerId: null,
@@ -30,10 +31,12 @@ const state = {
   windowsRefreshTimer: null,
   hostReconnectTimer: null,
   hostReconnectAttempts: 0,
+  authRequiredTimer: null,
   controlQueue: Promise.resolve(),
   moveRequestInFlight: false,
   pendingMovePayload: null,
-  viewportResizeTimer: null,
+  touchMoveScheduled: false,
+  pendingTouchMovePayload: null,
   keyboardVisibilityTimer: null,
   keyboardComposerRequested: false,
   keyboardPanelHoldUntil: 0,
@@ -49,9 +52,12 @@ const state = {
   followTyping: false,
   followMouse: false,
   activePointers: new Map(),
-  pinchState: null,
-  secondaryTapGesture: null,
+  twoFingerGesture: null,
+  longPressTimer: null,
+  longPressTriggered: false,
+  gestureStatusTimer: null,
   suppressPrimaryTapUp: false,
+  installPrompt: null,
   followTypingLogBuffer: [],
   followTypingLogTimer: null,
   followTypingLogFlushInFlight: false,
@@ -74,6 +80,15 @@ const state = {
   pendingTextScaleToast: false,
   textScaleApplyTimer: null,
   textScaleRequestInFlight: false,
+  gestureDiagnosticsEnabled: true,
+  gestureLogBuffer: [],
+  gestureLogTimer: null,
+  gestureLogFlushInFlight: false,
+  gestureSessionId: "",
+  currentGestureId: "",
+  pointerType: "unknown",
+  lastGestureMoveLoggedAt: 0,
+  lastOutboundMoveLoggedAt: 0,
 };
 
 const TRACKPAD_BASE_SPEED = 2.8;
@@ -84,6 +99,8 @@ const ACCESS_TOKEN_STORAGE_KEY = "pc-phone-link-token";
 const PAIRING_DEVICE_NAME_STORAGE_KEY = "pc-phone-link-pairing-device-name";
 const FIT_SHAPE_STORAGE_KEY = "pc-phone-link-fit-shape";
 const CONTROL_MODE_STORAGE_KEY = "pc-phone-link-control-mode";
+const GESTURE_DIAGNOSTICS_STORAGE_KEY = "pc-phone-link-gesture-diagnostics";
+const RECENT_WINDOWS_STORAGE_KEY = "pc-phone-link-recent-windows";
 const STREAM_FPS_STORAGE_KEY = "pc-phone-link-stream-fps";
 const STREAM_WIDTH_STORAGE_KEY = "pc-phone-link-stream-width";
 const STREAM_WIDTH_OPTIONS = [1920, 1600, 1280, 960, 720, 480];
@@ -93,17 +110,24 @@ const MAX_MESSAGE_HISTORY = 100;
 const MAX_VISIBLE_MESSAGE_HISTORY = 12;
 const KEYBOARD_VISIBLE_HEIGHT_DELTA = 140;
 const KEYBOARD_VISIBLE_HEIGHT_RATIO = 0.18;
-const SECONDARY_TAP_MAX_DISTANCE = 18;
-const SECONDARY_TAP_MAX_DURATION_MS = 320;
 const DIRECT_TOUCH_DRAG_THRESHOLD = 7;
+const LONG_PRESS_DURATION_MS = 560;
+const TWO_FINGER_PINCH_THRESHOLD = 12;
+const TWO_FINGER_SCROLL_HOLD_MS = 360;
+const TWO_FINGER_HOLD_SLOP = 10;
+const TWO_FINGER_SCROLL_START_THRESHOLD = 6;
 const MAX_CAMERA_SCALE = 6;
 const MAX_STREAM_FPS = 30;
 const DEFAULT_STREAM_FPS = 20;
 const MAX_STREAM_REQUEST_WIDTH = 1920;
 const MAX_STREAM_DEVICE_PIXEL_RATIO = 2.5;
+const STREAM_WIDTH_QUANTUM = 64;
 const STREAM_REFRESH_DEBOUNCE_MS = 180;
 const STREAM_SOCKET_MAX_FAILURES = 2;
 const STREAM_RECONNECT_DELAY_MS = 600;
+const AUTH_REQUIRED_MESSAGE = "Connect your phone to use PC Phone Link.";
+const AUTH_REQUIRED_RECHECK_DELAY_MS = 500;
+const MOBILE_SHELL_MEDIA = "(max-width: 899px), ((hover: none) and (pointer: coarse) and (max-width: 1366px))";
 
 const POWER_ACTIONS = {
   lock: { confirm: null, pending: "Locking the PC", done: "PC locked." },
@@ -121,6 +145,14 @@ const FIT_SHAPES = {
   "3-4": { label: "Tall", aspect: 3 / 4 },
 };
 
+class AuthRequiredError extends Error {
+  constructor(message = AUTH_REQUIRED_MESSAGE) {
+    super(message);
+    this.name = "AuthRequiredError";
+    this.authRequired = true;
+  }
+}
+
 const elements = {
   app: document.getElementById("app"),
   applyTextScale: document.getElementById("applyTextScale"),
@@ -128,12 +160,15 @@ const elements = {
   connectButton: document.getElementById("connectButton"),
   connectCodeDisplay: document.getElementById("connectCodeDisplay"),
   connectStatus: document.getElementById("connectStatus"),
+  connectionStatus: document.getElementById("connectionStatus"),
+  controlsPanel: document.getElementById("controlsPanel"),
+  controlMode: document.getElementById("controlMode"),
+  controlModeHelp: document.getElementById("controlModeHelp"),
   pairingApprovalCodeBlock: document.getElementById("pairingApprovalCodeBlock"),
   pairingApprovalCodeDisplay: document.getElementById("pairingApprovalCodeDisplay"),
   pairingDeviceName: document.getElementById("pairingDeviceName"),
   clearTextInput: document.getElementById("clearTextInput"),
   controlBar: document.getElementById("controlBar"),
-  deviceName: document.getElementById("deviceName"),
   doubleClickMode: document.getElementById("doubleClickMode"),
   emptyState: document.getElementById("emptyState"),
   applyFitShape: document.getElementById("applyFitShape"),
@@ -142,8 +177,8 @@ const elements = {
   fitShapeValue: document.getElementById("fitShapeValue"),
   focusWindow: document.getElementById("focusWindow"),
   followMouse: document.getElementById("followMouse"),
-  controlMode: document.getElementById("controlMode"),
   keyboardPanel: document.getElementById("keyboardPanel"),
+  mobileNav: document.getElementById("mobileNav"),
   maximizeWindow: document.getElementById("maximizeWindow"),
   messageHistory: document.getElementById("messageHistory"),
   messageHistorySection: document.getElementById("messageHistorySection"),
@@ -151,6 +186,8 @@ const elements = {
   mouseSpeedValue: document.getElementById("mouseSpeedValue"),
   powerMenu: document.getElementById("powerMenu"),
   powerToggle: document.getElementById("powerToggle"),
+  settingsPowerMenu: document.getElementById("settingsPowerMenu"),
+  settingsPowerToggle: document.getElementById("settingsPowerToggle"),
   refreshWindows: document.getElementById("refreshWindows"),
   refreshTrustedDevices: document.getElementById("refreshTrustedDevices"),
   remoteView: document.getElementById("remoteView"),
@@ -158,9 +195,7 @@ const elements = {
   rightClickMode: document.getElementById("rightClickMode"),
   scrollDown: document.getElementById("scrollDown"),
   scrollUp: document.getElementById("scrollUp"),
-  selectedWindowTitle: document.getElementById("selectedWindowTitle"),
   sendText: document.getElementById("sendText"),
-  statusPill: document.getElementById("statusPill"),
   streamFps: document.getElementById("streamFps"),
   streamFpsValue: document.getElementById("streamFpsValue"),
   streamWidth: document.getElementById("streamWidth"),
@@ -172,12 +207,23 @@ const elements = {
   textInput: document.getElementById("textInput"),
   textSmaller: document.getElementById("textSmaller"),
   toast: document.getElementById("toast"),
-  toggleDrawer: document.getElementById("toggleDrawer"),
+  toggleControls: document.getElementById("toggleControls"),
   toggleKeyboard: document.getElementById("toggleKeyboard"),
   touchLayer: document.getElementById("touchLayer"),
   trustedDevices: document.getElementById("trustedDevices"),
   trustedDevicesStatus: document.getElementById("trustedDevicesStatus"),
   toggleMessageHistory: document.getElementById("toggleMessageHistory"),
+  settingsPanel: document.getElementById("settingsPanel"),
+  installApp: document.getElementById("installApp"),
+  installCard: document.getElementById("installCard"),
+  installStatus: document.getElementById("installStatus"),
+  gestureHelp: document.getElementById("gestureHelp"),
+  gestureHelpButton: document.getElementById("gestureHelpButton"),
+  gestureStatus: document.getElementById("gestureStatus"),
+  gestureDiagnostics: document.getElementById("gestureDiagnostics"),
+  gestureLogPath: document.getElementById("gestureLogPath"),
+  clearGestureLogs: document.getElementById("clearGestureLogs"),
+  revealControls: document.getElementById("revealControls"),
   viewerShell: document.getElementById("viewerShell"),
   voiceInput: document.getElementById("voiceInput"),
   windowDrawer: document.getElementById("windowDrawer"),
@@ -186,6 +232,10 @@ const elements = {
 
 function clampRatio(value) {
   return Math.max(0, Math.min(1, value));
+}
+
+function usesMobileShell() {
+  return window.matchMedia(MOBILE_SHELL_MEDIA).matches;
 }
 
 function getViewportSize() {
@@ -271,20 +321,22 @@ function syncControlMode() {
   if (elements.controlMode) {
     elements.controlMode.value = state.controlMode;
   }
-  elements.viewerShell.classList.toggle("direct-touch-active", state.controlMode === "touch");
-  if (state.selectedWindow && elements.keyboardPanel.classList.contains("hidden")) {
-    elements.statusPill.textContent = getInputReadyStatus();
+  if (elements.controlModeHelp) {
+    elements.controlModeHelp.textContent = state.controlMode === "touch"
+      ? "Tap to click, one finger to pan viewer, hold two fingers until Scroll ready then drag to scroll, pinch to zoom, long press to right-click."
+      : "Drag to move PC mouse, tap to click, and use controls below for scrolling and right-click.";
   }
+  elements.viewerShell.classList.toggle("direct-touch-active", state.controlMode === "touch");
 }
 
 function setControlMode(value) {
-  state.controlMode = value === "touch" ? "touch" : "trackpad";
+  const nextMode = value === "trackpad" ? "trackpad" : "touch";
+  if (nextMode !== state.controlMode && (state.pointerDown || state.activePointers.size)) {
+    releaseActiveTouches();
+  }
+  state.controlMode = nextMode;
   window.localStorage.setItem(CONTROL_MODE_STORAGE_KEY, state.controlMode);
   syncControlMode();
-}
-
-function getInputReadyStatus() {
-  return state.controlMode === "touch" ? "Direct touch ready" : "Trackpad ready";
 }
 
 function clampStreamFps(value) {
@@ -419,6 +471,20 @@ function setCameraFocus(x, y) {
     y: clampRatio(y),
   };
   applyCameraTransform();
+}
+
+function panCameraByClientDelta(deltaX, deltaY) {
+  if (state.cameraScale <= 1) return false;
+  const displayed = getDisplayedImageRect();
+  const width = Math.max(displayed.width * state.cameraScale, 1);
+  const height = Math.max(displayed.height * state.cameraScale, 1);
+  const previous = { ...state.cameraFocus };
+  setCameraFocus(
+    state.cameraFocus.x - (deltaX / width),
+    state.cameraFocus.y - (deltaY / height),
+  );
+  return Math.abs(previous.x - state.cameraFocus.x) > 0.0001
+    || Math.abs(previous.y - state.cameraFocus.y) > 0.0001;
 }
 
 function getTypingMetrics() {
@@ -654,6 +720,80 @@ function writeClientLog(category, eventName, details = {}) {
   });
 }
 
+function diagnosticId(prefix) {
+  if (window.crypto?.randomUUID) return `${prefix}-${window.crypto.randomUUID()}`;
+  const random = window.crypto?.getRandomValues
+    ? Array.from(window.crypto.getRandomValues(new Uint32Array(2)), (value) => value.toString(36)).join("")
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${random}`.slice(0, 80);
+}
+
+function safeGestureDetails(details = {}) {
+  const allowed = new Set([
+    "action", "control_mode", "delta", "delta_x", "delta_y", "duration_ms", "error_code", "error_type",
+    "gesture", "gesture_id", "mode", "phase", "pointer_count", "pointer_type", "reason", "request_id",
+    "result", "session_id", "state", "target", "x", "y",
+  ]);
+  const output = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (!allowed.has(key) || value === undefined || value === null) continue;
+    output[key] = typeof value === "string" ? value.slice(0, 120) : value;
+  }
+  return output;
+}
+
+function logGestureDiagnostic(eventName, details = {}, { immediate = false, force = false } = {}) {
+  if (!state.gestureDiagnosticsEnabled && !force) return;
+  const entry = {
+    event: eventName,
+    at: new Date().toISOString(),
+    details: safeGestureDetails({
+      session_id: state.gestureSessionId,
+      gesture_id: state.currentGestureId,
+      control_mode: state.controlMode,
+      pointer_count: state.activePointers.size,
+      pointer_type: state.pointerType,
+      ...details,
+    }),
+  };
+  state.gestureLogBuffer.push(entry);
+  if (state.gestureLogBuffer.length > 80) state.gestureLogBuffer.splice(0, state.gestureLogBuffer.length - 80);
+  if (immediate || state.gestureLogBuffer.length >= 20) {
+    flushGestureDiagnostics();
+    return;
+  }
+  if (!state.gestureLogTimer) {
+    state.gestureLogTimer = window.setTimeout(() => {
+      state.gestureLogTimer = null;
+      flushGestureDiagnostics();
+    }, 750);
+  }
+}
+
+function flushGestureDiagnostics({ keepalive = false } = {}) {
+  if (state.gestureLogTimer) {
+    window.clearTimeout(state.gestureLogTimer);
+    state.gestureLogTimer = null;
+  }
+  if (!state.token || !state.gestureLogBuffer.length || state.gestureLogFlushInFlight) return;
+  const entries = state.gestureLogBuffer.splice(0, state.gestureLogBuffer.length);
+  state.gestureLogFlushInFlight = true;
+  fetch("/api/client-log", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Access-Token": state.token || "" },
+    body: JSON.stringify({ category: "gesture", entries }),
+    keepalive,
+  })
+    .catch(() => {
+      state.gestureLogBuffer.unshift(...entries);
+      if (state.gestureLogBuffer.length > 80) state.gestureLogBuffer.length = 80;
+    })
+    .finally(() => {
+      state.gestureLogFlushInFlight = false;
+      if (state.gestureLogBuffer.length) logGestureDiagnostic("flush-retry", { reason: "pending" });
+    });
+}
+
 function summarizeWindowForLog(windowInfo) {
   if (!windowInfo) {
     return null;
@@ -781,22 +921,30 @@ function loadViewerPreferences() {
   if (Number.isFinite(savedMouseSpeed)) {
     state.mouseSpeed = Math.min(Math.max(savedMouseSpeed, 0.5), 8);
   }
-
   state.followTyping = false;
   window.localStorage.removeItem("pc-phone-link-follow-typing");
   state.followMouse = window.localStorage.getItem("pc-phone-link-follow-mouse") === "true";
   const savedFitShape = window.localStorage.getItem(FIT_SHAPE_STORAGE_KEY) || "auto";
   state.fitShape = FIT_SHAPES[savedFitShape] ? savedFitShape : "auto";
-  const savedControlMode = window.localStorage.getItem(CONTROL_MODE_STORAGE_KEY) || "trackpad";
-  state.controlMode = savedControlMode === "touch" ? "touch" : "trackpad";
+  const savedControlMode = window.localStorage.getItem(CONTROL_MODE_STORAGE_KEY) || "touch";
+  state.controlMode = savedControlMode === "trackpad" ? "trackpad" : "touch";
+  state.gestureDiagnosticsEnabled = window.localStorage.getItem(GESTURE_DIAGNOSTICS_STORAGE_KEY) !== "false";
+  state.gestureSessionId = diagnosticId("session");
   const savedStreamFps = Number.parseInt(window.localStorage.getItem(STREAM_FPS_STORAGE_KEY) || "", 10);
   if (Number.isFinite(savedStreamFps)) {
     state.streamFps = clampStreamFps(savedStreamFps);
   }
   state.streamWidth = normalizeStreamWidth(window.localStorage.getItem(STREAM_WIDTH_STORAGE_KEY));
+  try {
+    const recent = JSON.parse(window.localStorage.getItem(RECENT_WINDOWS_STORAGE_KEY) || "[]");
+    state.recentWindowKeys = Array.isArray(recent) ? recent.filter((key) => typeof key === "string").slice(0, 4) : [];
+  } catch {
+    state.recentWindowKeys = [];
+  }
 
-  elements.mouseSpeed.value = String(state.mouseSpeed);
-  elements.followMouse.checked = state.followMouse;
+  if (elements.gestureDiagnostics) elements.gestureDiagnostics.checked = state.gestureDiagnosticsEnabled;
+  if (elements.mouseSpeed) elements.mouseSpeed.value = String(state.mouseSpeed);
+  if (elements.followMouse) elements.followMouse.checked = state.followMouse;
   updateMouseSpeedLabel();
   syncFitShapeControls();
   syncControlMode();
@@ -806,7 +954,7 @@ function loadViewerPreferences() {
 }
 
 function updateMouseSpeedLabel() {
-  elements.mouseSpeedValue.textContent = `${state.mouseSpeed.toFixed(2)}x`;
+  if (elements.mouseSpeedValue) elements.mouseSpeedValue.textContent = `${state.mouseSpeed.toFixed(2)}x`;
 }
 
 function clampTextScale(value) {
@@ -1203,6 +1351,63 @@ function beginConnectFlow({ statusMessage = null } = {}) {
   startConnectInfoPolling();
 }
 
+function isAuthRequiredError(error) {
+  return Boolean(error?.authRequired || error?.name === "AuthRequiredError");
+}
+
+function clearAuthRequiredVerification() {
+  if (state.authRequiredTimer) {
+    window.clearTimeout(state.authRequiredTimer);
+    state.authRequiredTimer = null;
+  }
+}
+
+function showAuthRequiredScreen(message = AUTH_REQUIRED_MESSAGE) {
+  clearAuthRequiredVerification();
+  state.token = null;
+  window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+  elements.authPanel.classList.remove("hidden");
+  beginConnectFlow({ statusMessage: message });
+}
+
+async function confirmStoredTokenRejected() {
+  const token = state.token || window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+  if (!token) {
+    return true;
+  }
+
+  try {
+    const response = await fetch("/api/info", {
+      cache: "no-store",
+      headers: { "X-Access-Token": token },
+    });
+    if (response.status === 401) {
+      return true;
+    }
+    if (response.ok) {
+      elements.authPanel.classList.add("hidden");
+      return false;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
+function scheduleAuthRequiredVerification(message = AUTH_REQUIRED_MESSAGE, delay = AUTH_REQUIRED_RECHECK_DELAY_MS) {
+  if (state.authRequiredTimer || !state.token) {
+    return;
+  }
+
+  state.authRequiredTimer = window.setTimeout(async () => {
+    state.authRequiredTimer = null;
+    if (await confirmStoredTokenRejected()) {
+      showAuthRequiredScreen(message);
+    }
+  }, delay);
+}
+
 function loadSavedToken() {
   const token = window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
   if (!token) {
@@ -1218,16 +1423,28 @@ function loadSavedToken() {
 
 function clearHostReconnectPolling() {
   if (state.hostReconnectTimer) {
-    window.clearInterval(state.hostReconnectTimer);
+    window.clearTimeout(state.hostReconnectTimer);
     state.hostReconnectTimer = null;
   }
   state.hostReconnectAttempts = 0;
 }
 
+function scheduleHostReconnect() {
+  if (state.hostReconnectTimer || !state.token) return;
+  const delay = Math.min(1000 * (2 ** state.hostReconnectAttempts), 10000);
+  setConnectionStatus("Reconnecting", false);
+  state.hostReconnectTimer = window.setTimeout(async () => {
+    state.hostReconnectTimer = null;
+    state.hostReconnectAttempts += 1;
+    await bootstrap({ quiet: true });
+  }, delay);
+}
+
 async function bootstrap({ quiet = false } = {}) {
+  setConnectionStatus("Connecting", false);
   try {
     const info = await apiFetch("/api/info");
-    elements.deviceName.textContent = info.device_name;
+    if (elements.gestureLogPath && info.gesture_log_path) elements.gestureLogPath.textContent = info.gesture_log_path;
     if (!window.localStorage.getItem(STREAM_FPS_STORAGE_KEY)) {
       state.streamFps = clampStreamFps(info.default_fps || state.streamFps);
       syncStreamFpsControl();
@@ -1235,27 +1452,33 @@ async function bootstrap({ quiet = false } = {}) {
     if (typeof info.text_scale === "number" && Number.isFinite(info.text_scale)) {
       setTextScaleValue(info.text_scale, { confirmed: true });
     }
-    elements.statusPill.textContent = getInputReadyStatus();
+    elements.authPanel.classList.add("hidden");
     await refreshWindows();
     void refreshTrustedDevices({ quiet: true });
     scheduleWindowRefresh();
     clearHostReconnectPolling();
+    clearAuthRequiredVerification();
+    setConnectionStatus("Connected", true);
+    logGestureDiagnostic("connection-state", { state: "connected", reason: quiet ? "reconnect" : "bootstrap" }, { immediate: true });
     return true;
   } catch (error) {
-    if (error.message === "Connect your phone to use PC Phone Link.") {
-      state.token = null;
-      window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
-      elements.statusPill.textContent = "Connect needed";
-      elements.authPanel.classList.remove("hidden");
-      beginConnectFlow();
-    } else if (!quiet) {
-      elements.statusPill.textContent = "Connection lost";
+    if (isAuthRequiredError(error)) {
+      scheduleAuthRequiredVerification(error.message || AUTH_REQUIRED_MESSAGE, 0);
     }
-    if (!quiet) {
+    if (!quiet && !isAuthRequiredError(error)) {
       showToast(error.message || "Connection failed.");
     }
+    setConnectionStatus("Offline", false);
+    logGestureDiagnostic("connection-state", { state: "offline", reason: isAuthRequiredError(error) ? "authentication" : "network" });
+    if (!isAuthRequiredError(error)) scheduleHostReconnect();
     return false;
   }
+}
+
+function setConnectionStatus(label, connected) {
+  if (!elements.connectionStatus) return;
+  elements.connectionStatus.textContent = label;
+  elements.connectionStatus.classList.toggle("connected", Boolean(connected));
 }
 
 function formatTrustedDeviceTime(value) {
@@ -1374,8 +1597,6 @@ async function deleteTrustedDevice(device) {
     state.selectedWindow = null;
     state.windows = [];
     state.phoneFitEnabled = false;
-    state.phoneFitOrientation = null;
-    state.phoneFitViewportSize = null;
     state.trustedDevices = [];
     window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
     elements.authPanel.classList.remove("hidden");
@@ -1401,20 +1622,28 @@ function scheduleWindowRefresh() {
 }
 
 async function apiFetch(path, options = {}) {
-  const headers = new Headers(options.headers || {});
+  const fetchOptions = { ...options };
+  const retryAuth = fetchOptions.retryAuth !== false;
+  delete fetchOptions.retryAuth;
+
+  const headers = new Headers(fetchOptions.headers || {});
   headers.set("X-Access-Token", state.token || "");
-  if (options.body && !headers.has("Content-Type")) {
+  if (fetchOptions.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
   const response = await fetch(path, {
-    ...options,
+    ...fetchOptions,
     headers,
   });
 
   if (response.status === 401) {
-    elements.authPanel.classList.remove("hidden");
-    throw new Error(await readErrorMessage(response, "Connect your phone to use PC Phone Link."));
+    const message = await readErrorMessage(response, AUTH_REQUIRED_MESSAGE);
+    if (retryAuth && state.token && !(await confirmStoredTokenRejected())) {
+      return apiFetch(path, { ...options, retryAuth: false });
+    }
+    scheduleAuthRequiredVerification(message, 0);
+    throw new AuthRequiredError(message);
   }
 
   if (!response.ok) {
@@ -1472,7 +1701,7 @@ function queueJsonPost(path, payload) {
 
 function handlePointerResponse(response, action = "") {
   if (response?.cursor) {
-    updateCursorPosition(response.cursor, { allowMouseFollow: true });
+    updateCursorPosition(response.cursor, { allowMouseFollow: action === "move_relative" });
     if (action === "click_current") {
       setTypingAnchorFromCursor(response.cursor);
     }
@@ -1490,12 +1719,9 @@ function updateSelectedWindow(windowInfo) {
   }
   state.selectedWindow = windowInfo;
   state.phoneFitEnabled = Boolean(windowInfo.is_phone_fit);
-  state.phoneFitOrientation = state.phoneFitEnabled ? getViewportOrientation() : null;
-  state.phoneFitViewportSize = state.phoneFitEnabled ? getPhoneFitRequestSize(getViewerFitSize()) : null;
   if (windowInfo.cursor) {
-    updateCursorPosition(windowInfo.cursor, { allowMouseFollow: true });
+    updateCursorPosition(windowInfo.cursor);
   }
-  elements.selectedWindowTitle.textContent = windowInfo.title;
   syncPhoneFitButton();
   syncTargetActionButtons();
   syncControlMode();
@@ -1533,8 +1759,6 @@ async function refreshWindows() {
   if (!updated) {
     state.selectedWindow = null;
     state.phoneFitEnabled = false;
-    state.phoneFitOrientation = null;
-    state.phoneFitViewportSize = null;
     resetViewer();
     showToast("That app closed. Open Windows to move to something else.");
     return;
@@ -1554,7 +1778,17 @@ function renderWindowList() {
     return;
   }
 
-  for (const windowInfo of state.windows) {
+  const recentIndex = (windowInfo) => state.recentWindowKeys.indexOf(getWindowRecentKey(windowInfo));
+  const orderedWindows = [...state.windows].sort((first, second) => {
+    const firstIndex = recentIndex(first);
+    const secondIndex = recentIndex(second);
+    if (firstIndex < 0 && secondIndex < 0) return 0;
+    if (firstIndex < 0) return 1;
+    if (secondIndex < 0) return -1;
+    return firstIndex - secondIndex;
+  });
+
+  for (const windowInfo of orderedWindows) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "window-card";
@@ -1575,6 +1809,9 @@ function renderWindowList() {
     if (windowInfo.is_minimized) {
       markers.push("minimized");
     }
+    if (recentIndex(windowInfo) >= 0) {
+      markers.push("recent");
+    }
     subtitle.textContent = markers.length ? `${processName} - ${markers.join(" - ")}` : processName;
     button.append(subtitle);
 
@@ -1586,17 +1823,29 @@ function renderWindowList() {
   }
 }
 
+function getWindowRecentKey(windowInfo) {
+  if (windowInfo.is_desktop_capture) return "desktop";
+  return String(windowInfo.process_name || "app").trim().toLowerCase();
+}
+
+function rememberRecentWindow(windowInfo) {
+  const key = getWindowRecentKey(windowInfo);
+  state.recentWindowKeys = [key, ...state.recentWindowKeys.filter((entry) => entry !== key)].slice(0, 4);
+  window.localStorage.setItem(RECENT_WINDOWS_STORAGE_KEY, JSON.stringify(state.recentWindowKeys));
+}
+
 async function selectWindow(windowInfo) {
   state.streamSocketFailures = 0;
-  updateSelectedWindow(windowInfo);
-  elements.emptyState.hidden = true;
-  elements.remoteView.style.display = "block";
   const response = await apiFetch(`/api/windows/${windowInfo.hwnd}/activate`, {
     method: "POST",
     body: JSON.stringify({ maximize: false }),
   });
+  rememberRecentWindow(windowInfo);
   updateSelectedWindow(response.window || windowInfo);
+  elements.emptyState.hidden = true;
+  elements.remoteView.style.display = "block";
   refreshStream();
+  openDestination("viewer");
   closeDrawerOnSmallScreens();
 }
 
@@ -1610,7 +1859,9 @@ function getStreamRequestWidth() {
   const zoomScale = Math.max(state.cameraScale || 1, 1);
   const visibleWidth = Math.max(displayed.width || 0, viewerRect.width || 0, 1);
   const requestedWidth = Math.round(visibleWidth * devicePixelRatio * zoomScale);
-  return Math.min(Math.max(requestedWidth, 360), MAX_STREAM_REQUEST_WIDTH);
+  const clampedWidth = Math.min(Math.max(requestedWidth, 360), MAX_STREAM_REQUEST_WIDTH);
+  const quantizedWidth = Math.round(clampedWidth / STREAM_WIDTH_QUANTUM) * STREAM_WIDTH_QUANTUM;
+  return Math.min(Math.max(quantizedWidth, 360), MAX_STREAM_REQUEST_WIDTH);
 }
 
 function scheduleStreamRefresh(delay = STREAM_REFRESH_DEBOUNCE_MS) {
@@ -1643,6 +1894,19 @@ function releaseStreamObjectUrl() {
   if (state.streamObjectUrl) {
     URL.revokeObjectURL(state.streamObjectUrl);
     state.streamObjectUrl = null;
+  }
+}
+
+function revokeStreamObjectUrlAfterPaint(objectUrl) {
+  if (!objectUrl) {
+    return;
+  }
+  window.requestAnimationFrame(() => URL.revokeObjectURL(objectUrl));
+}
+
+function acknowledgeStreamFrame(socket, generation) {
+  if (state.streamGeneration === generation && socket.readyState === WebSocket.OPEN) {
+    socket.send("r");
   }
 }
 
@@ -1742,24 +2006,40 @@ function openStreamSocket(params) {
 
 async function renderSocketFrame(frameBlob, socket, generation) {
   const objectUrl = URL.createObjectURL(frameBlob);
+  const image = new Image();
+  image.decoding = "async";
+  const imageLoaded = new Promise((resolve, reject) => {
+    image.onload = resolve;
+    image.onerror = reject;
+  });
+  image.src = objectUrl;
+
+  try {
+    if (typeof image.decode === "function") {
+      await image.decode();
+    } else {
+      await imageLoaded;
+    }
+  } catch {
+    URL.revokeObjectURL(objectUrl);
+    acknowledgeStreamFrame(socket, generation);
+    return;
+  }
+
+  if (state.streamGeneration !== generation || socket.readyState !== WebSocket.OPEN) {
+    URL.revokeObjectURL(objectUrl);
+    return;
+  }
+
   const previousUrl = state.streamObjectUrl;
   state.streamObjectUrl = objectUrl;
   elements.remoteView.src = objectUrl;
-  try {
-    if (typeof elements.remoteView.decode === "function") {
-      await elements.remoteView.decode();
-    }
-  } catch {
-    // Decode fails when a newer source replaced this frame; keep streaming.
-  }
   if (previousUrl) {
-    URL.revokeObjectURL(previousUrl);
+    revokeStreamObjectUrlAfterPaint(previousUrl);
   }
   // Acknowledge only after the frame is decoded so the host adapts its pace
   // to what this phone can actually display, instead of queueing stale frames.
-  if (state.streamGeneration === generation && socket.readyState === WebSocket.OPEN) {
-    socket.send("r");
-  }
+  acknowledgeStreamFrame(socket, generation);
 }
 
 function startMjpegFallback(params) {
@@ -1775,7 +2055,7 @@ function startMjpegFallback(params) {
 }
 
 function resetViewer() {
-  elements.selectedWindowTitle.textContent = "Open Windows to choose an app or fullscreen view";
+  if (state.pointerDown || state.activePointers.size) releaseActiveTouches();
   closeStreamSocket();
   releaseStreamObjectUrl();
   state.streamParams = null;
@@ -1795,13 +2075,33 @@ function resetViewer() {
 }
 
 function closeDrawerOnSmallScreens() {
-  if (window.innerWidth < 900) {
+  if (usesMobileShell()) {
     elements.windowDrawer.classList.remove("open");
   }
 }
 
-function toggleDrawer() {
-  elements.windowDrawer.classList.toggle("open");
+function syncControlsVisibility() {
+  elements.app.classList.toggle("controls-hidden", state.controlsHidden);
+  elements.revealControls?.classList.toggle("hidden", !state.controlsHidden);
+  if (elements.toggleControls) {
+    elements.toggleControls.textContent = state.controlsHidden ? "Show controls" : "Hide controls";
+    elements.toggleControls.setAttribute("aria-pressed", String(state.controlsHidden));
+  }
+}
+
+function setControlsHidden(hidden) {
+  state.controlsHidden = Boolean(hidden);
+  if (state.controlsHidden) {
+    togglePowerMenu(false);
+    elements.windowDrawer.classList.remove("open");
+  }
+  syncControlsVisibility();
+  applyCameraTransform();
+  scheduleStreamRefresh();
+}
+
+function toggleControls() {
+  setControlsHidden(!state.controlsHidden);
 }
 
 function setTapMode(mode) {
@@ -1829,7 +2129,6 @@ function openKeyboardCapture({ focusInput = true } = {}) {
   state.messageHistoryExpanded = false;
   syncMessageHistoryVisibility();
   syncVoiceInputButton();
-  elements.statusPill.textContent = "Keyboard ready";
   if (state.followTyping && state.selectedWindow) {
     ensureFollowTypingZoom("keyboard-open");
     if (!state.typingAnchor) {
@@ -1868,7 +2167,6 @@ function closeKeyboardCapture({ blurInput = true } = {}) {
     queueFollowTypingLog("keyboard-close", buildFollowTypingLogDetails(), { immediate: true });
   }
   state.typingAnchor = null;
-  elements.statusPill.textContent = state.selectedWindow ? getInputReadyStatus() : "Ready";
 }
 
 function toggleKeyboardPanel() {
@@ -2062,7 +2360,6 @@ function ensureVoiceRecognition() {
     state.keyboardComposerRequested = true;
     holdKeyboardCapture(12000);
     syncVoiceInputButton();
-    elements.statusPill.textContent = "Listening";
   };
 
   recognition.onresult = (event) => {
@@ -2104,9 +2401,6 @@ function ensureVoiceRecognition() {
     state.voiceListening = false;
     state.voiceBaseText = elements.textInput.value;
     syncVoiceInputButton();
-    elements.statusPill.textContent = elements.keyboardPanel.classList.contains("hidden")
-      ? (state.selectedWindow ? getInputReadyStatus() : "Ready")
-      : "Keyboard ready";
   };
 
   state.voiceRecognition = recognition;
@@ -2196,12 +2490,29 @@ function flushPendingMove() {
     });
 }
 
+function schedulePendingTouchMove() {
+  if (state.touchMoveScheduled || !state.pendingTouchMovePayload || !state.selectedWindow) return;
+  state.touchMoveScheduled = true;
+  queueControl(async () => {
+    const payload = state.pendingTouchMovePayload;
+    state.pendingTouchMovePayload = null;
+    if (!payload || !state.selectedWindow) return null;
+    return apiFetch(pointerPath(), { method: "POST", body: JSON.stringify(payload) });
+  })
+    .catch(handlePointerError)
+    .finally(() => {
+      state.touchMoveScheduled = false;
+      if (state.pendingTouchMovePayload) schedulePendingTouchMove();
+    });
+}
+
 function sendPointer(action, payload = {}) {
   if (!state.selectedWindow) {
     showToast("Open Windows and choose an app.");
     return;
   }
 
+  const requestId = diagnosticId("request");
   const requestPayload = {
     action,
     x: Number.isFinite(payload.x) ? payload.x : 0.5,
@@ -2209,7 +2520,28 @@ function sendPointer(action, payload = {}) {
     delta: payload.delta || 0,
     delta_x: payload.deltaX || 0,
     delta_y: payload.deltaY || 0,
+    request_id: requestId,
+    session_id: state.gestureSessionId,
+    gesture_id: state.currentGestureId || diagnosticId("gesture"),
+    control_mode: state.controlMode,
+    pointer_count: state.activePointers.size,
+    pointer_type: state.pointerType,
   };
+  const outboundNow = Date.now();
+  if (action !== "touch_move" || outboundNow - state.lastOutboundMoveLoggedAt >= 120) {
+    if (action === "touch_move") state.lastOutboundMoveLoggedAt = outboundNow;
+    logGestureDiagnostic("outbound-action", {
+      request_id: requestId,
+      gesture_id: requestPayload.gesture_id,
+      action,
+      x: requestPayload.x,
+      y: requestPayload.y,
+      delta: requestPayload.delta,
+      delta_x: requestPayload.delta_x,
+      delta_y: requestPayload.delta_y,
+      state: "queued",
+    });
+  }
 
   if (action === "move_relative") {
     state.pendingMovePayload = requestPayload;
@@ -2217,27 +2549,137 @@ function sendPointer(action, payload = {}) {
     return;
   }
 
+  if (action === "touch_move") {
+    state.pendingTouchMovePayload = requestPayload;
+    schedulePendingTouchMove();
+    return;
+  }
+
+  if (["touch_up", "touch_cancel"].includes(action) && state.pendingTouchMovePayload) {
+    const pendingMove = state.pendingTouchMovePayload;
+    state.pendingTouchMovePayload = null;
+    queueJsonPost(pointerPath(), pendingMove)
+      .then((response) => handlePointerResponse(response, pendingMove.action))
+      .catch(handlePointerError);
+  }
+
   queueJsonPost(pointerPath(), requestPayload)
-    .then((response) => handlePointerResponse(response, action))
-    .catch((error) => showToast(error.message));
+    .then((response) => {
+      logGestureDiagnostic("action-result", { request_id: requestId, action, result: "ok" });
+      return handlePointerResponse(response, action);
+    })
+    .catch(handlePointerError);
+}
+
+function handlePointerError(error) {
+  emergencyTouchCancel("request-error");
+  state.pendingTouchMovePayload = null;
+  state.activePointers.clear();
+  clearTwoFingerHoldTimer();
+  state.twoFingerGesture = null;
+  resetPrimaryPointerState();
+  const detail = error?.message || "Pointer request failed.";
+  logGestureDiagnostic("action-result", {
+    error_type: error?.name || "Error",
+    reason: /native touch|touch input|\[Errno \d+\]/i.test(detail) ? "native-touch" : "request",
+    result: "failed",
+  }, { immediate: true, force: true });
+  const message = /native touch|touch input|\[Errno \d+\]/i.test(detail)
+    ? `App touch stopped. Lift all fingers, then retry. ${detail}`
+    : detail;
+  showToast(message);
 }
 
 function getPointerDistance(first, second) {
-  return Math.hypot(second.x - first.x, second.y - first.y);
+  return window.PCPhoneLinkGestures.distance(first, second);
 }
 
 function getPointerMidpoint(first, second) {
-  return {
-    x: (first.x + second.x) / 2,
-    y: (first.y + second.y) / 2,
-  };
+  return window.PCPhoneLinkGestures.midpoint(first, second);
 }
 
-function clearSecondaryTapGesture() {
-  state.secondaryTapGesture = null;
+function haptic(pattern = 12) {
+  if (navigator.vibrate) navigator.vibrate(pattern);
+}
+
+function showGestureStatus(label, duration = 700) {
+  if (!elements.gestureStatus) return;
+  window.clearTimeout(state.gestureStatusTimer);
+  elements.gestureStatus.textContent = label;
+  elements.gestureStatus.hidden = false;
+  state.gestureStatusTimer = window.setTimeout(() => {
+    elements.gestureStatus.hidden = true;
+  }, duration);
+}
+
+function clearLongPress() {
+  if (state.longPressTimer) window.clearTimeout(state.longPressTimer);
+  state.longPressTimer = null;
+}
+
+function scheduleLongPress() {
+  clearLongPress();
+  if (state.controlMode !== "touch" || !state.startSourcePoint) return;
+  state.longPressTriggered = false;
+  state.longPressTimer = window.setTimeout(() => {
+    state.longPressTimer = null;
+    if (!state.pointerDown || state.dragActive || state.activePointers.size !== 1) return;
+    sendPointer("touch_hold", state.startSourcePoint);
+    logGestureDiagnostic("gesture-classified", { gesture: "long-press", state: "active" }, { immediate: true });
+    state.longPressTriggered = true;
+    state.suppressPrimaryTapUp = true;
+    haptic([18, 35, 18]);
+    showGestureStatus("Right-click");
+  }, LONG_PRESS_DURATION_MS);
+}
+
+function clearTwoFingerHoldTimer(gesture = state.twoFingerGesture) {
+  if (gesture?.holdTimer) window.clearTimeout(gesture.holdTimer);
+  if (gesture) gesture.holdTimer = null;
+}
+
+function scheduleTwoFingerScrollArm(gesture) {
+  clearTwoFingerHoldTimer(gesture);
+  gesture.holdTimer = window.setTimeout(() => {
+    gesture.holdTimer = null;
+    if (state.twoFingerGesture !== gesture || gesture.mode || !gesture.holdEligible) return;
+    const first = state.activePointers.get(gesture.pointerIds[0]);
+    const second = state.activePointers.get(gesture.pointerIds[1]);
+    if (!first || !second) return;
+    const motion = window.PCPhoneLinkGestures.twoFingerMotion(
+      gesture.startA,
+      gesture.startB,
+      first,
+      second,
+    );
+    if (motion.movementA > TWO_FINGER_HOLD_SLOP || motion.movementB > TWO_FINGER_HOLD_SLOP) {
+      gesture.holdEligible = false;
+      logGestureDiagnostic("gesture-state", { gesture: "two-finger-scroll", state: "disarmed", reason: "moved-before-hold" });
+      return;
+    }
+    gesture.scrollArmed = true;
+    gesture.armA = { ...first };
+    gesture.armB = { ...second };
+    haptic([12, 24, 12]);
+    showGestureStatus("Scroll ready", 900);
+    logGestureDiagnostic("gesture-state", { gesture: "two-finger-scroll", state: "armed" }, { immediate: true });
+  }, TWO_FINGER_SCROLL_HOLD_MS);
+}
+
+function finishTwoFingerGesture({ canceled = false } = {}) {
+  const gesture = state.twoFingerGesture;
+  clearTwoFingerHoldTimer(gesture);
+  if (gesture?.mode === "scroll" && gesture.lastSourcePoint) {
+    if (state.controlMode === "touch") sendPointer(canceled ? "touch_cancel" : "touch_up", gesture.lastSourcePoint);
+  }
+  if (gesture) gesture.pointerIds.forEach((pointerId) => state.activePointers.delete(pointerId));
+  state.twoFingerGesture = null;
+  clearLongPress();
+  resetPrimaryPointerState();
 }
 
 function resetPrimaryPointerState() {
+  clearLongPress();
   state.pointerDown = false;
   state.dragActive = false;
   state.pointerId = null;
@@ -2246,7 +2688,9 @@ function resetPrimaryPointerState() {
   state.startSourcePoint = null;
   state.lastSourcePoint = null;
   state.directTouchDownSent = false;
+  state.longPressTriggered = false;
   state.suppressPrimaryTapUp = false;
+  if (!state.activePointers.size) state.currentGestureId = "";
 }
 
 function getDirectTouchPoint(event) {
@@ -2259,41 +2703,32 @@ function sendTapActionAtPoint(point) {
   if (!point) {
     return;
   }
-  const action = state.tapMode === "double"
-    ? "double"
-    : state.tapMode === "right"
-      ? "right_tap"
-      : "tap";
+  const action = state.controlMode === "touch"
+    ? state.tapMode === "double"
+      ? "touch_double"
+      : state.tapMode === "right"
+        ? "touch_hold"
+        : "touch_tap"
+    : state.tapMode === "double"
+      ? "double"
+      : state.tapMode === "right"
+        ? "right_tap"
+        : "tap";
   sendPointer(action, point);
 }
 
-function startPinchGesture() {
-  const points = Array.from(state.activePointers.values());
-  if (points.length < 2) {
-    return;
-  }
-
-  const midpoint = getPointerMidpoint(points[0], points[1]);
-  clearSecondaryTapGesture();
-  state.suppressPrimaryTapUp = false;
-  state.pinchState = {
-    startDistance: Math.max(getPointerDistance(points[0], points[1]), 1),
-    startScale: state.cameraScale,
-    startFocus: viewerPointToSourceNormalized(midpoint.x, midpoint.y) || state.cameraFocus,
-  };
-
-  if (state.pointerId !== null && elements.touchLayer.hasPointerCapture(state.pointerId)) {
-    elements.touchLayer.releasePointerCapture(state.pointerId);
-  }
-
-  resetPrimaryPointerState();
-  setCameraFocus(state.pinchState.startFocus.x, state.pinchState.startFocus.y);
-}
-
 function handlePointerDown(event) {
+  if (state.activePointers.size === 0) state.currentGestureId = diagnosticId("gesture");
+  state.pointerType = ["touch", "pen", "mouse"].includes(event.pointerType) ? event.pointerType : "unknown";
   state.activePointers.set(event.pointerId, {
     x: event.clientX,
     y: event.clientY,
+  });
+  logGestureDiagnostic("pointer-down", {
+    phase: "down",
+    x: clampRatio(event.clientX / Math.max(elements.touchLayer.clientWidth || window.innerWidth, 1)),
+    y: clampRatio(event.clientY / Math.max(elements.touchLayer.clientHeight || window.innerHeight, 1)),
+    state: "recognizing",
   });
 
   if (state.activePointers.size >= 2) {
@@ -2302,37 +2737,39 @@ function handlePointerDown(event) {
     }
 
     event.preventDefault();
+    clearLongPress();
+    elements.touchLayer.setPointerCapture(event.pointerId);
 
-    if (state.pinchState) {
-      return;
-    }
+    if (state.activePointers.size > 2) return;
 
-    if (
-      state.pointerDown
-      && state.pointerId !== null
-      && state.activePointers.size === 2
-      && state.activePointers.has(state.pointerId)
-    ) {
-      const primaryPoint = state.activePointers.get(state.pointerId);
-      state.secondaryTapGesture = {
-        primaryPointerId: state.pointerId,
-        pointerId: event.pointerId,
-        primaryStartX: primaryPoint.x,
-        primaryStartY: primaryPoint.y,
-        primarySourcePoint: state.lastSourcePoint || state.startSourcePoint,
-        startX: event.clientX,
-        startY: event.clientY,
-        startedAt: Date.now(),
-      };
-      return;
-    }
-
-    clearSecondaryTapGesture();
-    startPinchGesture();
+    const primaryId = state.pointerId !== null && state.activePointers.has(state.pointerId)
+      ? state.pointerId
+      : Array.from(state.activePointers.keys()).find((pointerId) => pointerId !== event.pointerId);
+    const primaryPoint = state.activePointers.get(primaryId);
+    state.twoFingerGesture = {
+      pointerIds: [primaryId, event.pointerId],
+      startA: { ...primaryPoint },
+      startB: { x: event.clientX, y: event.clientY },
+      mode: null,
+      holdEligible: true,
+      holdTimer: null,
+      scrollArmed: false,
+      armA: null,
+      armB: null,
+      startScale: state.cameraScale,
+      startFocus: viewerPointToSourceNormalized(
+        (primaryPoint.x + event.clientX) / 2,
+        (primaryPoint.y + event.clientY) / 2,
+      ) || state.cameraFocus,
+      lastSourcePoint: null,
+    };
+    state.suppressPrimaryTapUp = true;
+    scheduleTwoFingerScrollArm(state.twoFingerGesture);
+    logGestureDiagnostic("gesture-state", { gesture: "two-finger", state: "candidate" });
     return;
   }
 
-  if (!state.selectedWindow || state.pinchState) {
+  if (!state.selectedWindow) {
     return;
   }
 
@@ -2353,6 +2790,7 @@ function handlePointerDown(event) {
   state.lastSourcePoint = state.startSourcePoint;
   state.directTouchDownSent = false;
   elements.touchLayer.setPointerCapture(event.pointerId);
+  scheduleLongPress();
 }
 
 function handlePointerMove(event) {
@@ -2362,50 +2800,101 @@ function handlePointerMove(event) {
       y: event.clientY,
     });
   }
-
-  if (state.pinchState) {
-    if (state.activePointers.size < 2) {
-      return;
-    }
-
-    event.preventDefault();
-    const points = Array.from(state.activePointers.values());
-    const midpoint = getPointerMidpoint(points[0], points[1]);
-    const distance = Math.max(getPointerDistance(points[0], points[1]), 1);
-    const nextScale = state.pinchState.startScale * (distance / state.pinchState.startDistance);
-    const nextFocus = viewerPointToSourceNormalized(midpoint.x, midpoint.y) || state.pinchState.startFocus;
-    setCameraFocus(nextFocus.x, nextFocus.y);
-    setCameraScale(nextScale);
-    return;
+  const now = Date.now();
+  if (now - state.lastGestureMoveLoggedAt >= 120) {
+    state.lastGestureMoveLoggedAt = now;
+    logGestureDiagnostic("pointer-move", {
+      phase: "move",
+      x: clampRatio(event.clientX / Math.max(elements.touchLayer.clientWidth || window.innerWidth, 1)),
+      y: clampRatio(event.clientY / Math.max(elements.touchLayer.clientHeight || window.innerHeight, 1)),
+      state: state.twoFingerGesture?.mode || (state.dragActive ? "drag" : "candidate"),
+    });
   }
 
-  if (state.secondaryTapGesture) {
-    const primaryPoint = state.activePointers.get(state.secondaryTapGesture.primaryPointerId);
-    const secondaryPoint = state.activePointers.get(state.secondaryTapGesture.pointerId);
+  if (state.twoFingerGesture) {
+    const gesture = state.twoFingerGesture;
+    const first = state.activePointers.get(gesture.pointerIds[0]);
+    const second = state.activePointers.get(gesture.pointerIds[1]);
+    if (!first || !second) return;
+    event.preventDefault();
+    clearLongPress();
 
-    if (!primaryPoint || !secondaryPoint) {
-      clearSecondaryTapGesture();
+    if (!gesture.mode) {
+      const pinchMode = window.PCPhoneLinkGestures.classifyTwoFingerGesture(
+        gesture.startA,
+        gesture.startB,
+        first,
+        second,
+        TWO_FINGER_PINCH_THRESHOLD,
+      );
+      if (pinchMode === "pinch") {
+        gesture.mode = "pinch";
+        clearTwoFingerHoldTimer(gesture);
+      } else if (
+        gesture.scrollArmed
+        && window.PCPhoneLinkGestures.isParallelTwoFingerDrag(
+          gesture.armA,
+          gesture.armB,
+          first,
+          second,
+          TWO_FINGER_SCROLL_START_THRESHOLD,
+        )
+      ) {
+        gesture.mode = "scroll";
+      } else {
+        if (gesture.holdEligible && !gesture.scrollArmed) {
+          const motion = window.PCPhoneLinkGestures.twoFingerMotion(
+            gesture.startA,
+            gesture.startB,
+            first,
+            second,
+          );
+          if (motion.movementA > TWO_FINGER_HOLD_SLOP || motion.movementB > TWO_FINGER_HOLD_SLOP) {
+            gesture.holdEligible = false;
+            clearTwoFingerHoldTimer(gesture);
+            logGestureDiagnostic("gesture-state", {
+              gesture: "two-finger-scroll",
+              state: "disarmed",
+              reason: "moved-before-hold",
+            });
+          }
+        }
+        return;
+      }
+      logGestureDiagnostic("gesture-classified", { gesture: gesture.mode, state: "active" }, { immediate: true });
+      state.suppressPrimaryTapUp = true;
+      if (gesture.mode === "pinch") {
+        haptic();
+        showGestureStatus("Zoom");
+        setCameraFocus(gesture.startFocus.x, gesture.startFocus.y);
+      } else {
+        showGestureStatus("Scroll");
+        const startMidpoint = getPointerMidpoint(gesture.armA, gesture.armB);
+        const startSource = viewerPointToSourceNormalized(startMidpoint.x, startMidpoint.y);
+        gesture.lastMidpoint = startMidpoint;
+        gesture.lastSourcePoint = startSource;
+        if (state.controlMode === "touch" && startSource) sendPointer("touch_down", startSource);
+      }
+    }
+
+    if (gesture.mode === "pinch") {
+      const startDistance = Math.max(getPointerDistance(gesture.startA, gesture.startB), 1);
+      setCameraScale(gesture.startScale * (getPointerDistance(first, second) / startDistance));
       return;
     }
 
-    const primaryMovement = Math.hypot(
-      primaryPoint.x - state.secondaryTapGesture.primaryStartX,
-      primaryPoint.y - state.secondaryTapGesture.primaryStartY,
-    );
-    const secondaryMovement = Math.hypot(
-      secondaryPoint.x - state.secondaryTapGesture.startX,
-      secondaryPoint.y - state.secondaryTapGesture.startY,
-    );
-
-    event.preventDefault();
-
-    if (
-      primaryMovement > SECONDARY_TAP_MAX_DISTANCE
-      || secondaryMovement > SECONDARY_TAP_MAX_DISTANCE
-      || state.activePointers.size > 2
-    ) {
-      startPinchGesture();
+    const midpoint = getPointerMidpoint(first, second);
+    if (state.controlMode === "touch") {
+      const sourcePoint = viewerPointToSourceNormalized(midpoint.x, midpoint.y) || gesture.lastSourcePoint;
+      if (sourcePoint) {
+        gesture.lastSourcePoint = sourcePoint;
+        sendPointer("touch_move", sourcePoint);
+      }
+    } else if (gesture.lastMidpoint) {
+      const deltaY = midpoint.y - gesture.lastMidpoint.y;
+      if (Math.abs(deltaY) >= 1) sendPointer("wheel_current", { delta: Math.round(-deltaY * 8) });
     }
+    gesture.lastMidpoint = midpoint;
     return;
   }
 
@@ -2424,8 +2913,15 @@ function handlePointerMove(event) {
   }
 
   const dragThreshold = state.controlMode === "touch" ? DIRECT_TOUCH_DRAG_THRESHOLD : 4;
+  const wasDragActive = state.dragActive;
   if (!state.dragActive && (totalDeltaX > dragThreshold || totalDeltaY > dragThreshold)) {
     state.dragActive = true;
+    clearLongPress();
+    showGestureStatus(state.controlMode === "touch" ? "Pan viewer" : "Mouse move");
+    logGestureDiagnostic(
+      "gesture-classified",
+      { gesture: state.controlMode === "touch" ? "one-finger-pan" : "mouse-move", state: "active" },
+    );
   }
 
   state.lastClientPoint = {
@@ -2434,17 +2930,16 @@ function handlePointerMove(event) {
   };
 
   if (state.controlMode === "touch") {
-    const point = getDirectTouchPoint(event);
-    if (!point) {
-      return;
-    }
-    state.lastSourcePoint = point;
-    if (!state.directTouchDownSent && (totalDeltaX > DIRECT_TOUCH_DRAG_THRESHOLD || totalDeltaY > DIRECT_TOUCH_DRAG_THRESHOLD)) {
-      sendPointer("down", state.startSourcePoint || point);
-      state.directTouchDownSent = true;
-    }
-    if (state.directTouchDownSent) {
-      sendPointer("move", point);
+    if (state.dragActive) {
+      const panDeltaX = wasDragActive ? deltaX : event.clientX - state.startClientPoint.x;
+      const panDeltaY = wasDragActive ? deltaY : event.clientY - state.startClientPoint.y;
+      const moved = panCameraByClientDelta(panDeltaX, panDeltaY);
+      logGestureDiagnostic("viewer-pan", {
+        gesture: "one-finger-pan",
+        delta_x: panDeltaX,
+        delta_y: panDeltaY,
+        result: moved ? "moved" : "bounded",
+      });
     }
     return;
   }
@@ -2456,60 +2951,19 @@ function handlePointerMove(event) {
 }
 
 function handlePointerUp(event) {
-  const secondaryTapGesture = state.secondaryTapGesture;
+  logGestureDiagnostic("pointer-up", { phase: "up", state: "finishing" });
 
-  if (secondaryTapGesture && event.pointerId === secondaryTapGesture.pointerId) {
-    const primaryPoint = state.activePointers.get(secondaryTapGesture.primaryPointerId);
-    const secondaryPoint = state.activePointers.get(secondaryTapGesture.pointerId);
-    const primaryMovement = primaryPoint
-      ? Math.hypot(
-        primaryPoint.x - secondaryTapGesture.primaryStartX,
-        primaryPoint.y - secondaryTapGesture.primaryStartY,
-      )
-      : Number.POSITIVE_INFINITY;
-    const secondaryMovement = secondaryPoint
-      ? Math.hypot(
-        secondaryPoint.x - secondaryTapGesture.startX,
-        secondaryPoint.y - secondaryTapGesture.startY,
-      )
-      : Number.POSITIVE_INFINITY;
-    const duration = Date.now() - secondaryTapGesture.startedAt;
-
+  if (state.twoFingerGesture && state.twoFingerGesture.pointerIds.includes(event.pointerId)) {
     event.preventDefault();
     state.activePointers.delete(event.pointerId);
-    clearSecondaryTapGesture();
-    state.suppressPrimaryTapUp = true;
-
-    if (
-      primaryPoint
-      && duration <= SECONDARY_TAP_MAX_DURATION_MS
-      && primaryMovement <= SECONDARY_TAP_MAX_DISTANCE
-      && secondaryMovement <= SECONDARY_TAP_MAX_DISTANCE
-    ) {
-      if (state.controlMode === "touch" && secondaryTapGesture.primarySourcePoint) {
-        sendPointer("right_tap", secondaryTapGesture.primarySourcePoint);
-      } else {
-        sendPointer("right_click_current");
-      }
+    for (const pointerId of state.twoFingerGesture.pointerIds) {
+      if (elements.touchLayer.hasPointerCapture(pointerId)) elements.touchLayer.releasePointerCapture(pointerId);
     }
+    finishTwoFingerGesture();
     return;
-  }
-
-  if (secondaryTapGesture && event.pointerId === secondaryTapGesture.primaryPointerId) {
-    event.preventDefault();
-    clearSecondaryTapGesture();
-    state.suppressPrimaryTapUp = true;
   }
 
   state.activePointers.delete(event.pointerId);
-
-  if (state.pinchState) {
-    event.preventDefault();
-    if (state.activePointers.size < 2) {
-      state.pinchState = null;
-    }
-    return;
-  }
 
   if (!state.selectedWindow || !state.pointerDown || event.pointerId !== state.pointerId) {
     return;
@@ -2526,10 +2980,11 @@ function handlePointerUp(event) {
     if (state.directTouchDownSent) {
       const releasePoint = point || state.lastSourcePoint || state.startSourcePoint;
       if (releasePoint) {
-        sendPointer("up", releasePoint);
+        sendPointer("touch_up", releasePoint);
       }
     } else if (!didDrag) {
       sendTapActionAtPoint(point);
+      showGestureStatus(state.tapMode === "right" ? "Right-click" : state.tapMode === "double" ? "Double-click" : "Tap");
     }
 
     if (state.tapMode !== "left") {
@@ -2565,20 +3020,23 @@ function handlePointerUp(event) {
 }
 
 function handlePointerCancel(event) {
-  if (
-    state.secondaryTapGesture
-    && (
-      event.pointerId === state.secondaryTapGesture.pointerId
-      || event.pointerId === state.secondaryTapGesture.primaryPointerId
-    )
-  ) {
-    clearSecondaryTapGesture();
+  logGestureDiagnostic("pointer-cancel", { phase: "cancel", reason: "browser", state: "reset" }, { immediate: true });
+  if (state.twoFingerGesture && state.twoFingerGesture.pointerIds.includes(event.pointerId)) {
+    state.activePointers.delete(event.pointerId);
+    for (const pointerId of state.twoFingerGesture.pointerIds) {
+      if (elements.touchLayer.hasPointerCapture(pointerId)) elements.touchLayer.releasePointerCapture(pointerId);
+    }
+    finishTwoFingerGesture({ canceled: true });
+    return;
   }
 
   state.activePointers.delete(event.pointerId);
 
-  if (state.pinchState && state.activePointers.size < 2) {
-    state.pinchState = null;
+  if (state.controlMode === "touch" && state.directTouchDownSent) {
+    const releasePoint = state.lastSourcePoint || state.startSourcePoint;
+    if (releasePoint) {
+      sendPointer("touch_cancel", releasePoint);
+    }
   }
 
   if (elements.touchLayer.hasPointerCapture(event.pointerId)) {
@@ -2705,61 +3163,25 @@ async function applyPhoneFit(trigger = "manual") {
     }),
   );
   state.phoneFitEnabled = true;
-  state.phoneFitOrientation = getViewportOrientation();
-  state.phoneFitViewportSize = requestSize;
   syncPhoneFitButton();
   refreshStream();
-}
-
-function scheduleAutoPhoneFit(trigger = "viewport-change") {
-  if (!state.phoneFitEnabled || !state.selectedWindow || state.selectedWindow.is_desktop_capture) {
-    return;
-  }
-
-  const nextViewerSize = getPhoneFitRequestSize(getViewerFitSize());
-  const previousViewerSize = state.phoneFitViewportSize;
-  const orientationChanged = getViewportOrientation() !== state.phoneFitOrientation;
-  const sizeChanged = !previousViewerSize
-    || Math.abs(nextViewerSize.width - previousViewerSize.width) >= 2
-    || Math.abs(nextViewerSize.height - previousViewerSize.height) >= 2;
-
-  if (!orientationChanged && !sizeChanged) {
-    return;
-  }
-
-  window.clearTimeout(state.viewportResizeTimer);
-  state.viewportResizeTimer = window.setTimeout(() => {
-    state.viewportResizeTimer = null;
-    applyPhoneFit(trigger).catch((error) => showToast(error.message));
-  }, 180);
 }
 
 async function requestTextSizeUpdate(
   action,
   {
     value = null,
-    statusMessage,
     successMessage = null,
     unchangedMessage = null,
     showSuccessToast = true,
     showUnchangedToast = true,
   } = {},
 ) {
-  const previousStatus = elements.statusPill.textContent;
-  if (statusMessage) {
-    elements.statusPill.textContent = statusMessage;
-  }
   let response;
-  try {
-    response = await apiFetch("/api/system/text-size", {
-      method: "POST",
-      body: JSON.stringify({ action, value }),
-    });
-  } catch (error) {
-    elements.statusPill.textContent = previousStatus;
-    throw error;
-  }
-  elements.statusPill.textContent = previousStatus;
+  response = await apiFetch("/api/system/text-size", {
+    method: "POST",
+    body: JSON.stringify({ action, value }),
+  });
   setTextScaleValue(response.text_scale, { confirmed: true });
   if (!response.changed) {
     if (showUnchangedToast && unchangedMessage) {
@@ -2781,7 +3203,6 @@ async function requestTextSizeUpdate(
 async function makeTextLarger() {
   cancelPendingTextScaleApply();
   await requestTextSizeUpdate("larger", {
-    statusMessage: "Making text larger",
     successMessage: "Text size increased to",
     unchangedMessage: (response) => `Text is already at the largest size (${response.text_scale}%).`,
   });
@@ -2790,7 +3211,6 @@ async function makeTextLarger() {
 async function makeTextSmaller() {
   cancelPendingTextScaleApply();
   await requestTextSizeUpdate("smaller", {
-    statusMessage: "Making text smaller",
     successMessage: "Text size decreased to",
     unchangedMessage: (response) => `Text is already at the smallest size (${response.text_scale}%).`,
   });
@@ -2823,7 +3243,6 @@ async function flushPendingTextScaleApply() {
   try {
     await requestTextSizeUpdate("set", {
       value: nextValue,
-      statusMessage: "Updating text size",
       successMessage: "Text size set to",
       unchangedMessage: (response) => `Text size is already ${response.text_scale}%.`,
       showSuccessToast,
@@ -2859,12 +3278,26 @@ function sendWheel(delta) {
   sendPointer("wheel_current", { delta });
 }
 
-function togglePowerMenu(force) {
-  if (!elements.powerMenu) {
-    return;
+function closePowerMenus() {
+  elements.powerMenu?.classList.add("hidden");
+  elements.settingsPowerMenu?.classList.add("hidden");
+  elements.powerToggle?.setAttribute("aria-expanded", "false");
+  elements.settingsPowerToggle?.setAttribute("aria-expanded", "false");
+}
+
+function togglePowerMenu(force, source = "desktop") {
+  const menu = source === "settings" ? elements.settingsPowerMenu : elements.powerMenu;
+  const toggle = source === "settings" ? elements.settingsPowerToggle : elements.powerToggle;
+  if (!menu || !toggle) return;
+  const shouldShow = typeof force === "boolean" ? force : menu.classList.contains("hidden");
+  closePowerMenus();
+  if (shouldShow) {
+    menu.classList.remove("hidden");
+    toggle.setAttribute("aria-expanded", "true");
+    if (source === "settings") {
+      window.requestAnimationFrame(() => menu.scrollIntoView({ block: "nearest", inline: "nearest" }));
+    }
   }
-  const shouldShow = typeof force === "boolean" ? force : elements.powerMenu.classList.contains("hidden");
-  elements.powerMenu.classList.toggle("hidden", !shouldShow);
 }
 
 async function requestPowerAction(action) {
@@ -2872,20 +3305,14 @@ async function requestPowerAction(action) {
   if (!config) {
     return;
   }
-  togglePowerMenu(false);
+  closePowerMenus();
   if (config.confirm && !window.confirm(config.confirm)) {
     return;
   }
-  const previousStatus = elements.statusPill.textContent;
-  elements.statusPill.textContent = config.pending;
-  try {
-    await apiFetch("/api/system/power", {
-      method: "POST",
-      body: JSON.stringify({ action }),
-    });
-  } finally {
-    elements.statusPill.textContent = previousStatus;
-  }
+  await apiFetch("/api/system/power", {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
   showToast(config.done);
 }
 
@@ -2907,8 +3334,6 @@ async function sendComposedText() {
     return;
   }
 
-  const previousStatus = elements.statusPill.textContent;
-  elements.statusPill.textContent = "Sending message";
   if (state.followTyping) {
     queueFollowTypingLog("send-message", buildFollowTypingLogDetails({
       textLength: message.length,
@@ -2917,22 +3342,26 @@ async function sendComposedText() {
     nudgeCameraForTyping(message, "forward");
   }
 
-  try {
-    await queueJsonPost(`/api/windows/${state.selectedWindow.hwnd}/text`, {
-      text: message,
-    });
-    await queueJsonPost(`/api/windows/${state.selectedWindow.hwnd}/key`, {
-      key: "enter",
-    });
-  } catch (error) {
-    elements.statusPill.textContent = previousStatus;
-    throw error;
-  }
+  await queueJsonPost(`/api/windows/${state.selectedWindow.hwnd}/text`, {
+    text: message,
+  });
+  await queueJsonPost(`/api/windows/${state.selectedWindow.hwnd}/key`, {
+    key: "enter",
+  });
 
   rememberSentMessage(message);
   clearComposerDraft();
-  elements.statusPill.textContent = previousStatus;
   showToast("Message sent.");
+}
+
+async function sendSpecialKey(key) {
+  if (!state.selectedWindow) {
+    showToast("Open Windows and choose an app.");
+    return;
+  }
+  holdKeyboardCapture();
+  await queueJsonPost(`/api/windows/${state.selectedWindow.hwnd}/key`, { key });
+  showGestureStatus(`Key: ${key}`);
 }
 
 function handleTextSubmit(event) {
@@ -2941,6 +3370,79 @@ function handleTextSubmit(event) {
     state.voiceRecognition.stop();
   }
   sendComposedText().catch((error) => showToast(error.message));
+}
+
+function openDestination(destination, { toggle = false } = {}) {
+  const next = toggle && state.currentDestination === destination ? "viewer" : destination;
+  closePowerMenus();
+  state.currentDestination = next;
+  elements.windowDrawer.classList.remove("panel-open");
+  elements.controlsPanel?.classList.remove("panel-open");
+  elements.settingsPanel?.classList.remove("panel-open");
+  if (next !== "keyboard" && !elements.keyboardPanel.classList.contains("hidden")) closeKeyboardCapture();
+
+  if (next === "windows") {
+    elements.windowDrawer.classList.add("open", "panel-open");
+  } else if (next === "keyboard") {
+    openKeyboardCapture({ focusInput: false });
+  } else if (next === "controls") {
+    elements.controlsPanel?.classList.add("panel-open");
+  } else if (next === "settings") {
+    elements.settingsPanel?.classList.add("panel-open");
+  }
+
+  document.querySelectorAll("[data-destination]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.destination === next);
+  });
+  if (history.replaceState) history.replaceState(null, "", `#${next}`);
+}
+
+function syncInstallUi() {
+  if (!elements.installCard) return;
+  const standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  if (standalone) {
+    elements.installStatus.textContent = "Installed. Running in app mode.";
+    elements.installApp.hidden = true;
+    return;
+  }
+  if (!window.isSecureContext) {
+    elements.installStatus.textContent = "This LAN HTTP page can be added as a home-screen shortcut where browser supports it. Full install, offline shell, and updates require trusted HTTPS.";
+    elements.installApp.hidden = true;
+    return;
+  }
+  elements.installApp.hidden = false;
+  elements.installApp.disabled = !state.installPrompt;
+  if (!state.installPrompt) {
+    const isiOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    elements.installStatus.textContent = isiOS
+      ? "In Safari, tap Share, then Add to Home Screen."
+      : "Use browser menu, then Install app or Add to Home screen.";
+  }
+}
+
+async function installApp() {
+  if (!state.installPrompt) {
+    syncInstallUi();
+    showToast(elements.installStatus?.textContent || "Use browser menu to install.");
+    return;
+  }
+  state.installPrompt.prompt();
+  await state.installPrompt.userChoice;
+  state.installPrompt = null;
+  syncInstallUi();
+}
+
+function registerPwa() {
+  syncInstallUi();
+  if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
+  navigator.serviceWorker.register("/sw.js").then((registration) => {
+    registration.addEventListener("updatefound", () => {
+      const worker = registration.installing;
+      worker?.addEventListener("statechange", () => {
+        if (worker.state === "installed" && navigator.serviceWorker.controller) showToast("App update ready. Reopen to use it.");
+      });
+    });
+  }).catch(() => {});
 }
 
 if (elements.pairingDeviceName) {
@@ -2954,7 +3456,9 @@ if (elements.pairingDeviceName) {
 
 elements.connectButton.addEventListener("click", () => connectPhone().catch((error) => showToast(error.message)));
 
-elements.toggleDrawer.addEventListener("click", toggleDrawer);
+if (elements.toggleControls) {
+  elements.toggleControls.addEventListener("click", toggleControls);
+}
 elements.refreshWindows.addEventListener("click", () => refreshWindows().catch((error) => showToast(error.message)));
 if (elements.focusWindow) {
   elements.focusWindow.addEventListener("click", () => focusSelectedWindow(false).catch((error) => showToast(error.message)));
@@ -2968,12 +3472,14 @@ if (elements.textLarger) {
 if (elements.textSmaller) {
   elements.textSmaller.addEventListener("click", () => makeTextSmaller().catch((error) => showToast(error.message)));
 }
-elements.mouseSpeed.addEventListener("input", (event) => {
-  const nextValue = Number.parseFloat(event.target.value);
-  state.mouseSpeed = Number.isFinite(nextValue) ? nextValue : 1;
-  window.localStorage.setItem("pc-phone-link-mouse-speed", String(state.mouseSpeed));
-  updateMouseSpeedLabel();
-});
+if (elements.mouseSpeed) {
+  elements.mouseSpeed.addEventListener("input", (event) => {
+    const nextValue = Number.parseFloat(event.target.value);
+    state.mouseSpeed = Number.isFinite(nextValue) ? nextValue : 1;
+    window.localStorage.setItem("pc-phone-link-mouse-speed", String(state.mouseSpeed));
+    updateMouseSpeedLabel();
+  });
+}
 if (elements.streamFps) {
   elements.streamFps.addEventListener("input", (event) => setStreamFps(event.target.value, { persist: true }));
   elements.streamFps.addEventListener("change", (event) => setStreamFps(event.target.value, { persist: true, refresh: true }));
@@ -2982,20 +3488,26 @@ if (elements.streamWidth) {
   elements.streamWidth.addEventListener("change", (event) => setStreamWidth(event.target.value, { persist: true, refresh: true }));
 }
 if (elements.powerToggle && elements.powerMenu) {
-  elements.powerToggle.addEventListener("click", () => togglePowerMenu());
-  elements.powerMenu.querySelectorAll("[data-power-action]").forEach((button) => {
+  elements.powerToggle.addEventListener("click", () => togglePowerMenu(undefined, "desktop"));
+}
+if (elements.settingsPowerToggle && elements.settingsPowerMenu) {
+  elements.settingsPowerToggle.addEventListener("click", () => togglePowerMenu(undefined, "settings"));
+}
+if (elements.powerMenu || elements.settingsPowerMenu) {
+  document.querySelectorAll("[data-power-action]").forEach((button) => {
     button.addEventListener("click", () => {
       requestPowerAction(button.dataset.powerAction).catch((error) => showToast(error.message));
     });
   });
   document.addEventListener("pointerdown", (event) => {
-    if (elements.powerMenu.classList.contains("hidden")) {
-      return;
-    }
-    if (elements.powerMenu.contains(event.target) || elements.powerToggle.contains(event.target)) {
-      return;
-    }
-    togglePowerMenu(false);
+    const insidePowerUi = elements.powerMenu?.contains(event.target)
+      || elements.powerToggle?.contains(event.target)
+      || elements.settingsPowerMenu?.contains(event.target)
+      || elements.settingsPowerToggle?.contains(event.target);
+    if (!insidePowerUi) closePowerMenus();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closePowerMenus();
   });
 }
 elements.textScale.addEventListener("input", (event) => {
@@ -3009,19 +3521,23 @@ elements.fitShape.addEventListener("change", (event) => {
   setFitShape(event.target.value, { apply: state.phoneFitEnabled });
 });
 elements.applyFitShape.addEventListener("click", () => applyPhoneFit("shape-button").catch((error) => showToast(error.message)));
-elements.controlMode.addEventListener("change", (event) => setControlMode(event.target.value));
+if (elements.controlMode) {
+  elements.controlMode.addEventListener("change", (event) => setControlMode(event.target.value));
+}
+if (elements.followMouse) {
+  elements.followMouse.addEventListener("change", (event) => {
+    state.followMouse = event.target.checked;
+    window.localStorage.setItem("pc-phone-link-follow-mouse", String(state.followMouse));
+  });
+}
 elements.refreshTrustedDevices.addEventListener("click", () => refreshTrustedDevices().catch((error) => showToast(error.message)));
-elements.followMouse.addEventListener("change", (event) => {
-  state.followMouse = event.target.checked;
-  window.localStorage.setItem("pc-phone-link-follow-mouse", String(state.followMouse));
-  if (state.followMouse) {
-    syncCameraToCursor();
-  }
-});
 if (elements.restoreWindow) {
   elements.restoreWindow.addEventListener("click", () => restoreSelectedWindow().catch((error) => showToast(error.message)));
 }
-elements.toggleKeyboard.addEventListener("click", toggleKeyboardPanel);
+elements.toggleKeyboard.addEventListener("click", () => {
+  if (usesMobileShell()) openDestination("keyboard", { toggle: true });
+  else toggleKeyboardPanel();
+});
 elements.toggleMessageHistory.addEventListener("pointerdown", () => holdKeyboardCapture());
 elements.toggleMessageHistory.addEventListener("click", toggleMessageHistoryPanel);
 elements.clearTextInput.addEventListener("click", () => clearComposerDraft());
@@ -3056,13 +3572,103 @@ elements.touchLayer.addEventListener("pointerup", handlePointerUp);
 elements.touchLayer.addEventListener("pointercancel", handlePointerCancel);
 elements.touchLayer.addEventListener("contextmenu", (event) => event.preventDefault());
 
+document.addEventListener("click", (event) => {
+  const specialKeyButton = event.target.closest("[data-special-key]");
+  if (specialKeyButton) {
+    sendSpecialKey(specialKeyButton.dataset.specialKey).catch((error) => showToast(error.message));
+    return;
+  }
+  const destinationButton = event.target.closest("[data-destination]");
+  if (destinationButton) openDestination(destinationButton.dataset.destination, { toggle: true });
+});
+elements.gestureHelpButton?.addEventListener("click", () => elements.gestureHelp?.showModal());
+elements.gestureDiagnostics?.addEventListener("change", () => {
+  state.gestureDiagnosticsEnabled = Boolean(elements.gestureDiagnostics.checked);
+  window.localStorage.setItem(GESTURE_DIAGNOSTICS_STORAGE_KEY, String(state.gestureDiagnosticsEnabled));
+  logGestureDiagnostic("diagnostics-setting", { state: state.gestureDiagnosticsEnabled ? "enabled" : "disabled" }, {
+    immediate: true,
+    force: state.gestureDiagnosticsEnabled,
+  });
+});
+elements.clearGestureLogs?.addEventListener("click", async () => {
+  try {
+    await apiFetch("/api/diagnostics/gestures/clear", { method: "POST" });
+    state.gestureLogBuffer = [];
+    showToast("Gesture logs cleared.");
+  } catch (error) {
+    showToast(error.message || "Could not clear gesture logs.");
+  }
+});
+elements.installApp?.addEventListener("click", () => installApp().catch(() => showToast("Install could not start.")));
+elements.revealControls?.addEventListener("click", () => setControlsHidden(false));
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  state.installPrompt = event;
+  syncInstallUi();
+});
+window.addEventListener("appinstalled", () => {
+  state.installPrompt = null;
+  syncInstallUi();
+  showToast("App installed.");
+});
+
+function releaseActiveTouches() {
+  if (state.twoFingerGesture) finishTwoFingerGesture({ canceled: true });
+  else if (state.controlMode === "touch" && state.directTouchDownSent) {
+    const point = state.lastSourcePoint || state.startSourcePoint;
+    if (point) sendPointer("touch_cancel", point);
+  }
+  state.activePointers.clear();
+  resetPrimaryPointerState();
+}
+
+function emergencyTouchCancel(reason) {
+  if (!state.token || !state.currentGestureId) return;
+  void fetch("/api/gestures/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Access-Token": state.token },
+    body: JSON.stringify({
+      session_id: state.gestureSessionId,
+      gesture_id: state.currentGestureId,
+      reason,
+    }),
+    keepalive: true,
+  }).catch(() => null);
+}
+window.addEventListener("blur", releaseActiveTouches);
+window.addEventListener("pagehide", () => {
+  emergencyTouchCancel("pagehide");
+  releaseActiveTouches();
+  logGestureDiagnostic("lifecycle-release", { reason: "pagehide", state: "reset" }, { immediate: true, force: true });
+  flushGestureDiagnostics({ keepalive: true });
+});
+window.addEventListener("error", () => {
+  logGestureDiagnostic("browser-error", { error_type: "ErrorEvent", reason: "uncaught", state: "failed" }, { immediate: true, force: true });
+});
+window.addEventListener("unhandledrejection", (event) => {
+  logGestureDiagnostic("browser-error", {
+    error_type: event.reason?.name || "PromiseRejection",
+    reason: "unhandled-rejection",
+    state: "failed",
+  }, { immediate: true, force: true });
+});
+window.addEventListener("offline", () => setConnectionStatus("Offline", false));
+window.addEventListener("online", () => {
+  clearHostReconnectPolling();
+  if (state.token) bootstrap({ quiet: true });
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && state.token && !state.hostReconnectTimer) {
+    bootstrap({ quiet: true });
+  }
+});
+
 window.addEventListener("resize", () => {
   syncViewportLayout();
   scheduleKeyboardComposerSync(60);
   if (state.selectedWindow) {
-    refreshStream();
+    scheduleStreamRefresh();
     applyCameraTransform();
-    scheduleAutoPhoneFit("window-resize");
   }
 });
 
@@ -3071,22 +3677,27 @@ if (window.visualViewport) {
     syncViewportLayout();
     scheduleKeyboardComposerSync(60);
     if (state.selectedWindow) {
-      refreshStream();
+      scheduleStreamRefresh();
       applyCameraTransform();
-      scheduleAutoPhoneFit("visual-viewport-resize");
     }
   });
   window.visualViewport.addEventListener("scroll", syncViewportLayout);
 }
 
 syncViewportLayout();
+syncControlsVisibility();
 syncTargetActionButtons();
 syncVoiceInputButton();
 loadViewerPreferences();
 loadMessageComposerState();
+registerPwa();
 loadSavedToken();
 renderTrustedDevices();
 if (elements.controlBar) {
   elements.controlBar.hidden = false;
 }
 syncKeyboardComposerVisibility();
+const initialDestination = window.location.hash.slice(1);
+if (["viewer", "windows", "keyboard", "controls", "settings"].includes(initialDestination)) {
+  openDestination(initialDestination);
+}

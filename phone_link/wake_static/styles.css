@@ -142,6 +142,21 @@ h2,
   padding: 0.8rem 1rem;
 }
 
+.auth-status {
+  color: #d7e3ff;
+  line-height: 1.5;
+}
+
+.connect-code {
+  margin: 0;
+  font-size: 2.5rem;
+  font-weight: 700;
+  letter-spacing: 0.35rem;
+  text-align: center;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+}
+
 .toast {
   position: fixed;
   left: 50%;

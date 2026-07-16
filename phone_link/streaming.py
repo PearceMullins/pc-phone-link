@@ -101,8 +101,6 @@ def _token_allowed(app: FastAPI, provided: str | None) -> bool:
     token = (provided or "").strip()
     if not token:
         return False
-    if token == app.state.access_token:
-        return True
     for entry in app.state.paired_browsers:
         if str(entry.get("token", "")).strip() == token:
             touch_paired_browser(app.state.paired_browsers, token)

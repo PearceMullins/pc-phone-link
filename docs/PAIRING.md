@@ -1,72 +1,80 @@
 # Pairing guide
 
-PC Phone Link uses **dual-approval pairing**. A new phone browser must be approved on **both** the PC and the phone before it can control your computer.
+PC Phone Link uses a **session code** plus **per-device approval codes** so you control exactly which phones can connect.
 
 ## First connection
 
-1. **Start the launcher** on your PC (`PCPhoneLinkLauncher.exe` or `run_phone_link_launcher.py`)
-2. **Open the launcher URL** on your phone browser (printed in the PC console, e.g. `http://192.168.1.10:8764/?token=YOUR-CODE`)
-3. Tap **Start controls** on the launcher page (or use `/api/start`) so the main host starts on port **8765**
-4. Open the **control URL** on your phone (also shown in the console, e.g. `http://192.168.1.10:8765/?token=YOUR-CODE`)
+1. **Start PC Phone Link** on your PC (`PCPhoneLinkHost.exe` or `run_phone_link.py`)
+2. A **desktop window** opens showing the session code and any phones waiting to connect. The same **URL** and **session code** are printed in the terminal, for example:
+   ```
+   http://192.168.1.10:8765/
+   Connect code: 4829
+   ```
+3. **Open the URL** on your phone browser (no token in the URL)
+4. Confirm the **session code on the phone matches your PC**
+5. Tap **Connect** on the phone
+6. On your PC, the phone appears under **Waiting to connect** with its own **approval code**
+7. Click **Approve** only for the device you want to allow
 
-## Pairing flow
+Each waiting phone gets a **different approval code** on your PC. Other people cannot connect unless you approve their specific device.
+
+## Connect flow
 
 ```mermaid
 sequenceDiagram
-    participant Phone as Phone browser
-    participant Host as PC Phone Link host
-    participant PC as Windows PC dialog
+  participant PCGui as PC desktop GUI
+  participant Host as PC Phone Link host
+  participant Phone as Phone browser
 
-    Phone->>Host: Request pairing
-    Host->>PC: Show approval dialog
-    PC->>Host: PC approves
-    Host->>Phone: Waiting for phone approval
-    Phone->>Host: Phone approves
-    Host->>Phone: Paired — connect to stream
+  Host->>PCGui: Show session code 4829
+  Phone->>Host: GET /api/connect-info
+  Host-->>Phone: connect_code 4829
+  Note over Phone,PCGui: Phone verifies session code
+  Phone->>Host: POST /api/pairing/request
+  Host->>PCGui: Android phone waiting code 3847
+  Host->>PCGui: iPhone waiting code 9124
+  PCGui->>Host: POST /api/pairing/{id}/approve for chosen device
+  Phone->>Host: GET /api/pairing/{id}
+  Host-->>Phone: Paired browser token
 ```
 
 ### Step by step
 
-1. When the phone opens the control URL, it sends a **pairing request**
-2. A **Windows dialog** appears on the PC asking whether to allow the device
-3. Click **OK** on the PC to approve
-4. On the phone, tap **Approve** to finish pairing
-5. The phone can now pick a window and start streaming
+1. When the phone opens the control URL, it loads the current session code from the PC
+2. The phone shows **Connect · CODE** — verify it matches the session code on your PC
+3. Tap **Connect** on the phone to request access
+4. Your PC shows the device name and a unique approval code for that phone
+5. Click **Approve** on the PC for the device you want to allow
+6. The phone can now pick a window and start streaming
+7. Connected phones appear in the PC desktop window, where you can **Remove** them
 
-If either side rejects the request, pairing fails and you must try again.
+## Return visits
 
-## Access token
+After the first connect, the phone saves a paired browser token in browser storage. Trusted devices can reconnect without tapping Connect again unless you delete the saved connection.
 
-The access token appears in:
+## Headless mode
 
-- The PC console when the launcher or host starts
-- `%LOCALAPPDATA%\PC Phone Link\access_token.txt`
-
-The token is included in URLs as `?token=...`. Keep it private — anyone on your network with the token could attempt to pair.
-
-To set a custom token when starting from Python:
-
-```powershell
-python run_phone_link_launcher.py --token MY-CUSTOM-CODE
-```
+If you start the host with `--no-gui`, the PC desktop window is not shown and the PC side is approved automatically when the phone taps Connect. Use the desktop GUI for per-device approval.
 
 ## Trusted devices
 
-After pairing, the browser is saved in `paired_browsers.json`. Trusted devices can reconnect without repeating the full flow in many cases.
+Paired browsers are stored in `%LOCALAPPDATA%\PC Phone Link\paired_browsers.json`.
 
-To **revoke** a device, use the trusted-devices section in the phone UI or delete entries from `paired_browsers.json` while the host is stopped.
+To **revoke** a device:
 
-## Pairing expires
-
-Pairing requests expire after a short window. If you wait too long between PC and phone approval, send a new request from the phone.
+- Use **Remove** in the PC desktop window, or
+- Use the trusted-devices section in the phone UI, or
+- Delete entries from `paired_browsers.json` while the host is stopped
 
 ## Tips
 
 - Use the same Wi‑Fi network on phone and PC (guest networks often block device-to-device traffic)
-- Bookmark the control URL on your phone after the first successful pairing
-- If the PC dialog does not appear, check that the host process is running and not blocked by focus-assist or remote session limits
+- Bookmark the control URL on your phone after the first successful connect
+- If the session code on the phone does not match your PC, refresh the phone page or restart the host
+- If two phones connect at once, each gets its own approval code so you can allow one and deny the other
+- Use `--no-gui` when running from Python if you do not want the desktop window
 
 ## Next steps
 
 - [Usage guide](USAGE.md)
-- [Troubleshooting pairing issues](TROUBLESHOOTING.md)
+- [Troubleshooting connect issues](TROUBLESHOOTING.md)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import io
+import threading
 import time
 import winreg
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ import win32ui
 from PIL import Image, ImageDraw, ImageFont, ImageGrab
 
 from .logging_utils import log_event
+from .gesture_diagnostics import log_gesture
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
@@ -42,6 +44,16 @@ TEXT_SCALE_MAX = 225
 TEXT_SCALE_STEP = 5
 SETTING_CHANGE_TIMEOUT_MS = 5000
 FULLSCREEN_TARGET_HWND = -1
+PT_TOUCH = 0x00000002
+POINTER_FLAG_INRANGE = 0x00000002
+POINTER_FLAG_INCONTACT = 0x00000004
+POINTER_FLAG_DOWN = 0x00010000
+POINTER_FLAG_UPDATE = 0x00020000
+POINTER_FLAG_UP = 0x00040000
+POINTER_FLAG_CANCELED = 0x00008000
+TOUCH_MASK_CONTACTAREA = 0x00000001
+TOUCH_FEEDBACK_DEFAULT = 0x00000001
+TOUCH_CURSOR_GUARD_MAX_SECONDS = 15.0
 
 send_message_timeout = user32.SendMessageTimeoutW
 send_message_timeout.argtypes = [
@@ -73,6 +85,68 @@ class RECT(ctypes.Structure):
         ("right", ctypes.c_long),
         ("bottom", ctypes.c_long),
     ]
+
+
+class POINTER_INFO(ctypes.Structure):
+    _fields_ = [
+        ("pointerType", wintypes.DWORD),
+        ("pointerId", wintypes.DWORD),
+        ("frameId", wintypes.DWORD),
+        ("pointerFlags", wintypes.DWORD),
+        ("sourceDevice", wintypes.HANDLE),
+        ("hwndTarget", wintypes.HWND),
+        ("ptPixelLocation", wintypes.POINT),
+        ("ptHimetricLocation", wintypes.POINT),
+        ("ptPixelLocationRaw", wintypes.POINT),
+        ("ptHimetricLocationRaw", wintypes.POINT),
+        ("dwTime", wintypes.DWORD),
+        ("historyCount", wintypes.DWORD),
+        ("inputData", ctypes.c_int32),
+        ("dwKeyStates", wintypes.DWORD),
+        ("performanceCount", ctypes.c_uint64),
+        ("buttonChangeType", wintypes.DWORD),
+    ]
+
+
+class POINTER_TOUCH_INFO(ctypes.Structure):
+    _fields_ = [
+        ("pointerInfo", POINTER_INFO),
+        ("touchFlags", wintypes.DWORD),
+        ("touchMask", wintypes.DWORD),
+        ("rcContact", RECT),
+        ("rcContactRaw", RECT),
+        ("orientation", wintypes.DWORD),
+        ("pressure", wintypes.DWORD),
+    ]
+
+
+initialize_touch_injection = user32.InitializeTouchInjection
+initialize_touch_injection.argtypes = [wintypes.UINT, wintypes.DWORD]
+initialize_touch_injection.restype = wintypes.BOOL
+inject_touch_input = user32.InjectTouchInput
+inject_touch_input.argtypes = [wintypes.UINT, ctypes.POINTER(POINTER_TOUCH_INFO)]
+inject_touch_input.restype = wintypes.BOOL
+get_clip_cursor = user32.GetClipCursor
+get_clip_cursor.argtypes = [ctypes.POINTER(RECT)]
+get_clip_cursor.restype = wintypes.BOOL
+clip_cursor = user32.ClipCursor
+clip_cursor.argtypes = [ctypes.POINTER(RECT)]
+clip_cursor.restype = wintypes.BOOL
+
+_touch_lock = threading.Lock()
+_touch_initialized = False
+_touch_contact_active = False
+_touch_contact_point = (0, 0)
+_touch_gesture_id = ""
+_touch_cursor_anchor: tuple[int, int] | None = None
+_touch_cursor_guard_stop: threading.Event | None = None
+_touch_cursor_guard_thread: threading.Thread | None = None
+_touch_cursor_guard_generation = 0
+_touch_cursor_guard_lock = threading.RLock()
+_touch_cursor_previous_clip: tuple[int, int, int, int] | None = None
+_touch_cursor_clip_locked = False
+_touch_cursor_settle_stop: threading.Event | None = None
+_touch_cursor_settle_thread: threading.Thread | None = None
 
 
 class KEYBDINPUT(ctypes.Structure):
@@ -473,14 +547,33 @@ def handle_pointer(
     delta: int = 0,
     delta_x: float = 0.0,
     delta_y: float = 0.0,
+    *,
+    gesture_id: str = "",
 ) -> None:
     if _is_fullscreen_target(hwnd):
-        _handle_fullscreen_pointer(action, x_ratio, y_ratio, delta=delta, delta_x=delta_x, delta_y=delta_y)
+        _handle_fullscreen_pointer(
+            action, x_ratio, y_ratio, delta=delta, delta_x=delta_x, delta_y=delta_y, gesture_id=gesture_id
+        )
         return
 
     ensured = _ensure_window(hwnd)
     clamped_x = _clamp_ratio(x_ratio)
     clamped_y = _clamp_ratio(y_ratio)
+
+    if action.startswith("touch_"):
+        if action in {"touch_tap", "touch_double", "touch_hold", "touch_down"}:
+            _start_touch_cursor_guard()
+            try:
+                focus_window(ensured)
+            except Exception:
+                _stop_touch_cursor_guard(settle_seconds=0)
+                raise
+        _handle_native_touch(
+            action, *_bounds_point(get_window_rect(ensured), clamped_x, clamped_y), gesture_id=gesture_id
+        )
+        return
+
+    _stop_touch_cursor_guard(settle_seconds=0)
 
     if action == "move_relative":
         _move_cursor_relative_within_window(ensured, delta_x, delta_y)
@@ -543,10 +636,19 @@ def _handle_fullscreen_pointer(
     delta: int = 0,
     delta_x: float = 0.0,
     delta_y: float = 0.0,
+    gesture_id: str = "",
 ) -> None:
     bounds = _get_virtual_screen_bounds()
     clamped_x = _clamp_ratio(x_ratio)
     clamped_y = _clamp_ratio(y_ratio)
+
+    if action.startswith("touch_"):
+        if action in {"touch_tap", "touch_double", "touch_hold", "touch_down"}:
+            _start_touch_cursor_guard()
+        _handle_native_touch(action, *_bounds_point(bounds, clamped_x, clamped_y), gesture_id=gesture_id)
+        return
+
+    _stop_touch_cursor_guard(settle_seconds=0)
 
     if action == "move_relative":
         _move_cursor_relative_within_bounds(bounds, delta_x, delta_y)
@@ -902,14 +1004,367 @@ def _move_cursor_to_bounds_point(
     x_ratio: float,
     y_ratio: float,
 ) -> tuple[int, int]:
+    screen_x, screen_y = _bounds_point(bounds, x_ratio, y_ratio)
+    win32api.SetCursorPos((screen_x, screen_y))
+    return screen_x, screen_y
+
+
+def _bounds_point(
+    bounds: tuple[int, int, int, int],
+    x_ratio: float,
+    y_ratio: float,
+) -> tuple[int, int]:
     left, top, right, bottom = bounds
     width = max(right - left, 1)
     height = max(bottom - top, 1)
 
     screen_x = int(left + x_ratio * (width - 1))
     screen_y = int(top + y_ratio * (height - 1))
-    win32api.SetCursorPos((screen_x, screen_y))
     return screen_x, screen_y
+
+
+def _handle_native_touch(action: str, screen_x: int, screen_y: int, *, gesture_id: str = "") -> None:
+    if action == "touch_tap":
+        _inject_touch_contact("down", screen_x, screen_y, gesture_id=gesture_id)
+        time.sleep(0.015)
+        _inject_touch_contact("up", screen_x, screen_y, gesture_id=gesture_id)
+        return
+    if action == "touch_double":
+        _handle_native_touch("touch_tap", screen_x, screen_y, gesture_id=gesture_id)
+        time.sleep(0.08)
+        _handle_native_touch("touch_tap", screen_x, screen_y, gesture_id=gesture_id)
+        return
+    if action == "touch_hold":
+        _inject_touch_contact("down", screen_x, screen_y, gesture_id=gesture_id)
+        try:
+            # Windows cancels a stationary press without periodic UPDATE frames.
+            for _ in range(7):
+                time.sleep(0.12)
+                _inject_touch_contact("move", screen_x, screen_y, gesture_id=gesture_id)
+        finally:
+            _inject_touch_contact("up", screen_x, screen_y, gesture_id=gesture_id)
+        return
+    if action == "touch_down":
+        _inject_touch_contact("down", screen_x, screen_y, gesture_id=gesture_id)
+        return
+    if action == "touch_move":
+        _inject_touch_contact("move", screen_x, screen_y, gesture_id=gesture_id)
+        return
+    if action == "touch_up":
+        _inject_touch_contact("up", screen_x, screen_y, gesture_id=gesture_id)
+        return
+    if action == "touch_cancel":
+        _inject_touch_contact("cancel", screen_x, screen_y, gesture_id=gesture_id)
+        return
+    raise ValueError(f"Unsupported native touch action: {action}")
+
+
+def cancel_active_touch(*, gesture_id: str = "", reason: str = "recovery") -> bool:
+    """Release a possibly stuck synthetic contact without moving the mouse."""
+    global _touch_contact_active, _touch_contact_point, _touch_gesture_id
+    with _touch_lock:
+        if not _touch_contact_active:
+            log_gesture("win32-reset", {"reason": reason, "state": "already-idle"})
+            return False
+        if gesture_id and _touch_gesture_id and gesture_id != _touch_gesture_id:
+            log_gesture("win32-reset-ignored", {"reason": reason, "state": "different-gesture"})
+            return False
+        try:
+            _inject_touch_contact_unlocked("cancel", *_touch_contact_point)
+        except OSError as error:
+            error_code = getattr(error, "winerror", None) or getattr(error, "errno", 0) or 0
+            log_gesture("win32-reset-failed", {"reason": reason, "error_code": error_code}, level="error")
+            if error_code != 87:
+                raise
+        finally:
+            _touch_contact_active = False
+            _touch_contact_point = (0, 0)
+            _touch_gesture_id = ""
+            _stop_touch_cursor_guard(settle_seconds=0)
+        log_gesture("win32-reset", {"reason": reason, "state": "idle", "result": "ok"})
+        return True
+
+
+def _inject_touch_contact(phase: str, screen_x: int, screen_y: int, *, gesture_id: str = "") -> None:
+    global _touch_initialized, _touch_contact_active, _touch_contact_point, _touch_gesture_id
+
+    with _touch_lock:
+        if not _touch_initialized:
+            if not initialize_touch_injection(1, TOUCH_FEEDBACK_DEFAULT):
+                error_code = ctypes.get_last_error()
+                log_gesture("win32-initialize-failed", {"phase": phase, "error_code": error_code}, level="error")
+                raise OSError(error_code, "Windows couldn't initialize native touch input.")
+            _touch_initialized = True
+            log_gesture("win32-initialized", {"state": "ready"})
+
+        if (
+            gesture_id
+            and _touch_gesture_id
+            and gesture_id != _touch_gesture_id
+            and phase in {"move", "up", "cancel"}
+        ):
+            log_gesture("win32-stale-frame-ignored", {"phase": phase, "state": "active-contact"})
+            return
+
+        if phase == "down" and not _touch_contact_active:
+            _start_touch_cursor_guard()
+
+        try:
+            if phase == "down" and _touch_contact_active:
+                _inject_touch_contact_unlocked("cancel", *_touch_contact_point)
+                _touch_contact_active = False
+            elif phase in {"move", "up", "cancel"} and not _touch_contact_active:
+                if phase in {"up", "cancel"}:
+                    return
+                phase = "down"
+
+            # InjectTouchInput requires UP/CANCELED at exact prior frame position.
+            if phase in {"up", "cancel"}:
+                screen_x, screen_y = _touch_contact_point
+            _inject_touch_contact_unlocked(phase, screen_x, screen_y)
+        except OSError as error:
+            _touch_contact_active = False
+            _touch_contact_point = (0, 0)
+            _touch_gesture_id = ""
+            _stop_touch_cursor_guard()
+            error_code = getattr(error, "winerror", None) or getattr(error, "errno", 0) or 0
+            log_gesture(
+                "win32-inject-failed",
+                {"phase": phase, "error_code": error_code, "state": "reset"},
+                level="error",
+            )
+            if error_code == 87 and phase in {"down", "move"}:
+                time.sleep(0.01)
+                _start_touch_cursor_guard()
+                try:
+                    _inject_touch_contact_unlocked("down", screen_x, screen_y)
+                except Exception:
+                    _stop_touch_cursor_guard(settle_seconds=0)
+                    log_gesture(
+                        "win32-inject-recovery-failed",
+                        {"phase": phase, "error_code": error_code, "state": "idle"},
+                        level="error",
+                    )
+                    raise
+                _touch_contact_active = True
+                _touch_contact_point = (screen_x, screen_y)
+                _touch_gesture_id = gesture_id
+                log_gesture("win32-inject-recovered", {"phase": phase, "recovered": "true", "state": "down"})
+                return
+            if error_code == 87 and phase in {"up", "cancel"}:
+                log_gesture("win32-release-recovered", {"phase": phase, "recovered": "true", "state": "idle"})
+                return
+            raise
+        except Exception:
+            _touch_contact_active = False
+            _touch_contact_point = (0, 0)
+            _touch_gesture_id = ""
+            _stop_touch_cursor_guard()
+            raise
+        _touch_contact_point = (screen_x, screen_y)
+        _touch_contact_active = phase not in {"up", "cancel"}
+        _touch_gesture_id = gesture_id if _touch_contact_active else ""
+        if not _touch_contact_active:
+            settle_anchor = _touch_cursor_anchor
+            if settle_anchor is not None:
+                _start_touch_cursor_settle(settle_anchor)
+            _schedule_touch_cursor_guard_stop()
+
+
+def _inject_touch_contact_unlocked(phase: str, screen_x: int, screen_y: int) -> None:
+    pointer_flags = {
+        "down": POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT | POINTER_FLAG_DOWN,
+        "move": POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT | POINTER_FLAG_UPDATE,
+        "up": POINTER_FLAG_UP,
+        "cancel": POINTER_FLAG_CANCELED | POINTER_FLAG_UP,
+    }.get(phase)
+    if pointer_flags is None:
+        raise ValueError(f"Unsupported touch phase: {phase}")
+
+    contact_radius = 3
+    point = wintypes.POINT(screen_x, screen_y)
+    contact = POINTER_TOUCH_INFO()
+    contact.pointerInfo.pointerType = PT_TOUCH
+    contact.pointerInfo.pointerId = 0
+    contact.pointerInfo.pointerFlags = pointer_flags
+    contact.pointerInfo.ptPixelLocation = point
+    # Raw coordinates are output metadata; setting them makes InjectTouchInput fail with ERROR_INVALID_PARAMETER.
+    contact.touchMask = TOUCH_MASK_CONTACTAREA
+    contact.rcContact = RECT(
+        screen_x - contact_radius,
+        screen_y - contact_radius,
+        screen_x + contact_radius,
+        screen_y + contact_radius,
+    )
+    log_gesture("win32-frame", {"phase": phase, "flags": pointer_flags, "state": "inject"})
+    _inject_touch_input_preserving_cursor(contact)
+    log_gesture("win32-frame-result", {"phase": phase, "flags": pointer_flags, "result": "ok"})
+
+
+def _inject_touch_input_preserving_cursor(contact: POINTER_TOUCH_INFO) -> None:
+    cursor_x, cursor_y = win32api.GetCursorPos()
+    previous_clip = RECT()
+    clip_saved = bool(get_clip_cursor(ctypes.byref(previous_clip)))
+    cursor_lock = RECT(cursor_x, cursor_y, cursor_x + 1, cursor_y + 1)
+    cursor_locked = clip_saved and bool(clip_cursor(ctypes.byref(cursor_lock)))
+    injection_error = 0
+
+    try:
+        if not inject_touch_input(1, ctypes.byref(contact)):
+            injection_error = ctypes.get_last_error()
+    finally:
+        if cursor_locked and not clip_cursor(ctypes.byref(previous_clip)):
+            clip_cursor(None)
+        if win32api.GetCursorPos() != (cursor_x, cursor_y):
+            win32api.SetCursorPos((cursor_x, cursor_y))
+
+    if injection_error:
+        raise OSError(injection_error, "Windows rejected native touch input.")
+
+
+def _start_touch_cursor_guard() -> None:
+    global _touch_cursor_anchor, _touch_cursor_guard_stop, _touch_cursor_guard_thread
+    global _touch_cursor_guard_generation, _touch_cursor_previous_clip, _touch_cursor_clip_locked
+
+    with _touch_cursor_guard_lock:
+        _touch_cursor_guard_generation += 1
+        if _touch_cursor_anchor is not None and _touch_cursor_guard_thread is not None and _touch_cursor_guard_thread.is_alive():
+            return
+
+        # Desktop apps can promote injected touch into mouse movement; keep that compatibility event cursorless.
+        _stop_touch_cursor_guard(settle_seconds=0)
+        _touch_cursor_anchor = tuple(win32api.GetCursorPos())
+        previous_clip = RECT()
+        if get_clip_cursor(ctypes.byref(previous_clip)):
+            _touch_cursor_previous_clip = (
+                previous_clip.left,
+                previous_clip.top,
+                previous_clip.right,
+                previous_clip.bottom,
+            )
+            cursor_lock = RECT(
+                _touch_cursor_anchor[0],
+                _touch_cursor_anchor[1],
+                _touch_cursor_anchor[0] + 1,
+                _touch_cursor_anchor[1] + 1,
+            )
+            _touch_cursor_clip_locked = bool(clip_cursor(ctypes.byref(cursor_lock)))
+        else:
+            _touch_cursor_previous_clip = None
+            _touch_cursor_clip_locked = False
+        _touch_cursor_guard_stop = threading.Event()
+        _touch_cursor_guard_thread = threading.Thread(
+            target=_guard_touch_cursor,
+            args=(_touch_cursor_anchor, _touch_cursor_guard_stop),
+            name="pc-phone-link-cursor-guard",
+            daemon=True,
+        )
+        _touch_cursor_guard_thread.start()
+
+
+def _guard_touch_cursor(anchor: tuple[int, int], stop_event: threading.Event) -> None:
+    deadline = time.monotonic() + TOUCH_CURSOR_GUARD_MAX_SECONDS
+    while time.monotonic() < deadline and not stop_event.wait(0.001):
+        if win32api.GetCursorPos() != anchor:
+            win32api.SetCursorPos(anchor)
+
+
+def _start_touch_cursor_settle(anchor: tuple[int, int], duration_seconds: float = 0.8) -> None:
+    global _touch_cursor_settle_stop, _touch_cursor_settle_thread
+    if _touch_cursor_settle_stop is not None:
+        _touch_cursor_settle_stop.set()
+    stop_event = threading.Event()
+    _touch_cursor_settle_stop = stop_event
+
+    def restore() -> None:
+        deadline = time.monotonic() + duration_seconds
+        while time.monotonic() < deadline and not stop_event.wait(0.001):
+            try:
+                if win32api.GetCursorPos() != anchor:
+                    win32api.SetCursorPos(anchor)
+            except pywintypes.error:
+                return
+
+    _touch_cursor_settle_thread = threading.Thread(
+        target=restore,
+        name="pc-phone-link-cursor-settle",
+        daemon=True,
+    )
+    _touch_cursor_settle_thread.start()
+
+
+def _stop_touch_cursor_settle() -> None:
+    global _touch_cursor_settle_stop, _touch_cursor_settle_thread
+    if _touch_cursor_settle_stop is not None:
+        _touch_cursor_settle_stop.set()
+    if _touch_cursor_settle_thread is not None and _touch_cursor_settle_thread.is_alive():
+        _touch_cursor_settle_thread.join(timeout=0.05)
+    _touch_cursor_settle_stop = None
+    _touch_cursor_settle_thread = None
+
+
+def _schedule_touch_cursor_guard_stop(delay_seconds: float = 0.8) -> None:
+    global _touch_cursor_guard_generation
+
+    with _touch_cursor_guard_lock:
+        _touch_cursor_guard_generation += 1
+        expected_generation = _touch_cursor_guard_generation
+        expected_stop = _touch_cursor_guard_stop
+    timer = threading.Timer(
+        delay_seconds,
+        _stop_touch_cursor_guard,
+        kwargs={"expected_stop": expected_stop, "expected_generation": expected_generation},
+    )
+    timer.name = "pc-phone-link-cursor-guard-settle"
+    timer.daemon = True
+    timer.start()
+
+
+def _stop_touch_cursor_guard(
+    *,
+    settle_seconds: float = 0.04,
+    expected_stop: threading.Event | None = None,
+    expected_generation: int | None = None,
+) -> None:
+    global _touch_cursor_anchor, _touch_cursor_guard_stop, _touch_cursor_guard_thread
+    global _touch_cursor_previous_clip, _touch_cursor_clip_locked
+
+    with _touch_cursor_guard_lock:
+        if expected_stop is not None and _touch_cursor_guard_stop is not expected_stop:
+            return
+        if expected_generation is not None and _touch_cursor_guard_generation != expected_generation:
+            return
+        if expected_stop is not None and _touch_contact_active:
+            return
+
+        _stop_touch_cursor_settle()
+
+        anchor = _touch_cursor_anchor
+        if anchor is not None:
+            deadline = time.perf_counter() + max(settle_seconds, 0)
+            while time.perf_counter() < deadline:
+                if win32api.GetCursorPos() != anchor:
+                    win32api.SetCursorPos(anchor)
+                time.sleep(0.001)
+
+        if _touch_cursor_guard_stop is not None:
+            _touch_cursor_guard_stop.set()
+        if _touch_cursor_guard_thread is not None and _touch_cursor_guard_thread.is_alive():
+            _touch_cursor_guard_thread.join(timeout=0.1)
+        if anchor is not None and win32api.GetCursorPos() != anchor:
+            win32api.SetCursorPos(anchor)
+
+        if _touch_cursor_clip_locked:
+            if _touch_cursor_previous_clip is not None:
+                clip_cursor(ctypes.byref(RECT(*_touch_cursor_previous_clip)))
+            else:
+                clip_cursor(None)
+
+        _touch_cursor_anchor = None
+        _touch_cursor_guard_stop = None
+        _touch_cursor_guard_thread = None
+        _touch_cursor_previous_clip = None
+        _touch_cursor_clip_locked = False
 
 
 def _move_cursor_relative_within_window(hwnd: int, delta_x: float, delta_y: float) -> tuple[int, int]:

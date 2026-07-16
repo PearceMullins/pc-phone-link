@@ -20,6 +20,8 @@ a = Analysis(
         "win32process",
         "win32com",
         "win32com.client",
+        "_tkinter",
+        "tkinter",
         "PIL",
         "PIL.Image",
         "PIL.ImageGrab",

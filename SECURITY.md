@@ -13,17 +13,17 @@ PC Phone Link is designed for **local network use** on a trusted home or office 
 
 ### What the app protects
 
-- **Access token** — Required on every API call and in the control URL query string
-- **Dual-approval pairing** — New browsers must be approved on both the PC and the phone
+- **Connect code** — Shown on the PC terminal and phone so you can confirm you reached the correct PC before connecting
+- **Paired browser tokens** — Required for control APIs and streaming after the first connect
 - **Trusted device list** — Paired browsers are stored locally; you can revoke access
 
 ### What the app does not provide
 
 - **No HTTPS/TLS** — Traffic between phone and PC is plain HTTP on your LAN
 - **No encryption of streamed video** — Window capture is sent over the local network unencrypted
-- **No account system** — Security relies on network isolation and the access token
+- **No account system** — Security relies on network isolation and paired browser tokens
 
-Treat your access token like a password. Anyone on your network who knows the token and pairing is approved can control your PC.
+Anyone on your LAN who can reach the host could read the connect code from `/api/connect-info` and attempt to connect. Treat your network as the primary security boundary.
 
 ## Reporting a vulnerability
 
@@ -41,8 +41,7 @@ We aim to acknowledge reports within 7 days.
 
 ## Recommendations for users
 
-- Keep the host and launcher bound to your LAN; do not port-forward to the internet without additional protection
-- Use a strong, unique access token (the app generates one by default)
+- Keep the host bound to your LAN; do not port-forward to the internet without additional protection
 - Revoke paired browsers you no longer use
 - Prefer a VPN (Tailscale, WireGuard) when accessing your PC from outside the home network
-- Enable Windows Firewall rules only for the ports you need (8764 launcher, 8765 host, 8780 wake relay)
+- Enable Windows Firewall rules only for the ports you need (8765 host, 8780 wake relay)

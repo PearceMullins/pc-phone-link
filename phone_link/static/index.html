@@ -3,191 +3,93 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07101f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Phone Link">
   <title>PC Phone Link</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=20260704c">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260716j">
 </head>
 <body>
   <div id="app">
-    <aside id="windowDrawer" class="window-drawer open">
+    <aside id="windowDrawer" class="window-drawer open mobile-panel" data-panel="windows" aria-label="Windows">
       <div class="drawer-header">
-        <div>
-          <p class="eyebrow">PC Phone Link</p>
-          <h1>Windows</h1>
-        </div>
+        <div><p class="eyebrow">PC Phone Link</p><h1>Windows</h1></div>
         <button id="refreshWindows" class="ghost-button" type="button">Refresh</button>
       </div>
       <div id="windowList" class="window-list"></div>
-      <section class="drawer-settings">
-        <label class="setting-label" for="mouseSpeed">
-          <span>Mouse speed</span>
-          <strong id="mouseSpeedValue">1.00x</strong>
-        </label>
-        <input
-          id="mouseSpeed"
-          class="speed-slider"
-          type="range"
-          min="0.5"
-          max="8"
-          step="0.1"
-          value="2.5"
-        >
-        <label class="setting-label" for="streamFps">
-          <span>Frame rate</span>
-          <strong id="streamFpsValue">20 fps</strong>
-        </label>
-        <input
-          id="streamFps"
-          class="speed-slider"
-          type="range"
-          min="1"
-          max="30"
-          step="1"
-          value="20"
-        >
-        <label class="setting-label" for="streamWidth">
-          <span>Resolution</span>
-          <strong id="streamWidthValue">Auto</strong>
-        </label>
-        <select id="streamWidth" class="setting-select">
-          <option value="auto">Auto (fit phone)</option>
-          <option value="1920">1920 px (sharpest)</option>
-          <option value="1600">1600 px</option>
-          <option value="1280">1280 px</option>
-          <option value="960">960 px</option>
-          <option value="720">720 px</option>
-          <option value="480">480 px (fastest)</option>
-        </select>
-        <label class="toggle-setting" for="followMouse">
-          <span>Follow mouse</span>
-          <input id="followMouse" type="checkbox">
-        </label>
-        <label class="setting-label" for="textScale">
-          <span>PC text size</span>
-          <strong id="textScaleValue">100%</strong>
-        </label>
-        <input
-          id="textScale"
-          class="speed-slider"
-          type="range"
-          min="100"
-          max="225"
-          step="1"
-          value="100"
-        >
-        <button id="applyTextScale" class="ghost-button" type="button" disabled>Apply text size</button>
-        <div class="drawer-button-row">
-          <button id="textSmaller" class="ghost-button" type="button">Smaller</button>
-          <button id="textLarger" class="ghost-button" type="button">Larger</button>
-        </div>
-        <label class="setting-label" for="fitShape">
-          <span>Screen shape</span>
-          <strong id="fitShapeValue">Phone</strong>
-        </label>
-        <select id="fitShape" class="setting-select">
-          <option value="auto">Phone</option>
-          <option value="16-9">16:9</option>
-          <option value="16-10">16:10</option>
-          <option value="4-3">4:3</option>
-          <option value="1-1">Square</option>
-          <option value="3-4">Tall</option>
-        </select>
+    </aside>
+
+    <aside id="controlsPanel" class="mobile-panel utility-panel" data-panel="controls" aria-label="Controls">
+      <div class="drawer-header"><div><p class="eyebrow">Remote input</p><h1>Controls</h1></div></div>
+      <section id="controlBar" class="drawer-settings">
+        <label class="setting-label" for="controlMode"><span>Control style</span></label>
+        <select id="controlMode" class="setting-select"><option value="touch">App touch</option><option value="trackpad">Mouse trackpad</option></select>
+        <p id="controlModeHelp" class="setting-help">Tap to click, one finger to pan viewer, hold two fingers until Scroll ready then drag to scroll, pinch to zoom, long press to right-click.</p>
+        <label class="setting-label" for="mouseSpeed"><span>Mouse speed</span><strong id="mouseSpeedValue">2.50x</strong></label>
+        <input id="mouseSpeed" class="speed-slider" type="range" min="0.5" max="8" step="0.1" value="2.5">
+        <label class="toggle-setting" for="followMouse"><span>Follow mouse</span><input id="followMouse" type="checkbox"></label>
+        <button id="gestureHelpButton" class="ghost-button" type="button">Gesture help</button>
+        <div class="drawer-button-row"><button id="rightClickMode" class="ghost-button" type="button">Right click</button><button id="doubleClickMode" class="ghost-button" type="button">Double click</button></div>
+        <div class="drawer-button-row"><button id="scrollUp" class="ghost-button" type="button">Scroll up</button><button id="scrollDown" class="ghost-button" type="button">Scroll down</button></div>
+        <div class="drawer-button-row"><button id="focusWindow" class="ghost-button" type="button">Focus</button><button id="maximizeWindow" class="ghost-button" type="button">Maximize</button><button id="restoreWindow" class="ghost-button" type="button">Restore</button></div>
+        <label class="setting-label" for="fitShape"><span>Screen shape</span><strong id="fitShapeValue">Phone</strong></label>
+        <select id="fitShape" class="setting-select"><option value="auto">Phone</option><option value="16-9">16:9</option><option value="16-10">16:10</option><option value="4-3">4:3</option><option value="1-1">Square</option><option value="3-4">Tall</option></select>
         <button id="applyFitShape" class="ghost-button" type="button" disabled>Apply shape</button>
-        <label class="setting-label" for="controlMode">
-          <span>Screen tapping</span>
-        </label>
-        <select id="controlMode" class="setting-select">
-          <option value="trackpad">Trackpad</option>
-          <option value="touch">Direct touch</option>
-        </select>
-        <div class="drawer-button-row">
-          <button id="rightClickMode" class="ghost-button" type="button">Right click</button>
-          <button id="doubleClickMode" class="ghost-button" type="button">Double click</button>
-        </div>
-        <div class="drawer-button-row">
-          <button id="scrollUp" class="ghost-button" type="button">Scroll up</button>
-          <button id="scrollDown" class="ghost-button" type="button">Scroll down</button>
-        </div>
-        <section class="trusted-devices-section">
-          <div class="trusted-devices-header">
-            <span>Trusted phones</span>
-            <button id="refreshTrustedDevices" class="ghost-button compact-button" type="button">Refresh</button>
-          </div>
-          <p id="trustedDevicesStatus" class="trusted-devices-status">No saved phones loaded.</p>
-          <div id="trustedDevices" class="trusted-devices-list"></div>
-        </section>
       </section>
     </aside>
 
-    <header class="topbar">
-      <button id="toggleDrawer" class="ghost-button" type="button">Windows</button>
-      <div class="title-stack">
-        <span class="eyebrow" id="deviceName">Phone link</span>
-        <strong id="selectedWindowTitle">Open Windows to choose an app or fullscreen view</strong>
-      </div>
-      <div class="topbar-actions">
-        <button id="powerToggle" class="ghost-button" type="button">Power</button>
-        <button id="fitToggle" class="ghost-button" type="button">Fit</button>
-        <button id="toggleKeyboard" class="ghost-button" type="button">Keyboard</button>
-        <div id="powerMenu" class="power-menu hidden">
-          <button type="button" class="power-menu-item" data-power-action="lock">Lock</button>
-          <button type="button" class="power-menu-item" data-power-action="sleep">Sleep</button>
-          <button type="button" class="power-menu-item" data-power-action="restart">Restart</button>
-          <button type="button" class="power-menu-item power-menu-danger" data-power-action="shutdown">Shut down</button>
-        </div>
-      </div>
+    <aside id="settingsPanel" class="mobile-panel utility-panel" data-panel="settings" aria-label="Settings">
+      <div class="drawer-header"><div><p class="eyebrow">PC Phone Link</p><h1>Settings</h1></div><span id="connectionStatus" class="connection-status" role="status">Connecting</span></div>
+      <section class="drawer-settings">
+        <section id="installCard" class="install-card">
+          <strong>Home screen / app install</strong><p id="installStatus">Add PC Phone Link to home screen for app-like use.</p>
+          <button id="installApp" class="primary-button" type="button">Install</button>
+        </section>
+        <label class="setting-label" for="streamFps"><span>Frame rate</span><strong id="streamFpsValue">20 fps</strong></label>
+        <input id="streamFps" class="speed-slider" type="range" min="1" max="30" step="1" value="20">
+        <label class="setting-label" for="streamWidth"><span>Resolution</span><strong id="streamWidthValue">Auto</strong></label>
+        <select id="streamWidth" class="setting-select"><option value="auto">Auto (fit phone)</option><option value="1920">1920 px (sharpest)</option><option value="1600">1600 px</option><option value="1280">1280 px</option><option value="960">960 px</option><option value="720">720 px</option><option value="480">480 px (fastest)</option></select>
+        <label class="setting-label" for="textScale"><span>PC text size</span><strong id="textScaleValue">100%</strong></label>
+        <input id="textScale" class="speed-slider" type="range" min="100" max="225" step="1" value="100">
+        <button id="applyTextScale" class="ghost-button" type="button" disabled>Apply text size</button>
+        <div class="drawer-button-row"><button id="textSmaller" class="ghost-button" type="button">Smaller</button><button id="textLarger" class="ghost-button" type="button">Larger</button></div>
+        <section class="settings-power-section" aria-labelledby="settingsPowerTitle"><div class="settings-power-header"><strong id="settingsPowerTitle">PC power</strong><button id="settingsPowerToggle" class="ghost-button compact-button" type="button" aria-expanded="false" aria-controls="settingsPowerMenu" aria-haspopup="true">Power controls</button></div><div id="settingsPowerMenu" class="settings-power-menu hidden"><button type="button" class="power-menu-item" data-power-action="lock">Lock</button><button type="button" class="power-menu-item" data-power-action="sleep">Sleep</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="restart">Restart</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="shutdown">Shut down</button></div></section>
+        <section class="trusted-devices-section"><div class="trusted-devices-header"><span>Trusted phones</span><button id="refreshTrustedDevices" class="ghost-button compact-button" type="button">Refresh</button></div><p id="trustedDevicesStatus" class="trusted-devices-status">No saved phones loaded.</p><div id="trustedDevices" class="trusted-devices-list"></div></section>
+        <section class="diagnostics-section"><label class="toggle-setting" for="gestureDiagnostics"><span>Gesture diagnostics</span><input id="gestureDiagnostics" type="checkbox" checked></label><p class="setting-help">Records gesture states, safe coordinates, delivery results, and Windows touch errors. Never records typed text, connection codes, addresses, tokens, or window names.</p><p id="gestureLogPath" class="diagnostics-path">Log path loads after connection.</p><button id="clearGestureLogs" class="ghost-button" type="button">Clear gesture logs</button></section>
+      </section>
+    </aside>
+
+    <header class="topbar" aria-label="Viewer actions">
+      <div class="topbar-actions"><button id="powerToggle" class="ghost-button" type="button" aria-expanded="false" aria-controls="powerMenu" aria-haspopup="true">Power</button><button id="fitToggle" class="ghost-button" type="button">Fit</button><button id="toggleKeyboard" class="ghost-button" type="button">Keyboard</button><button class="ghost-button desktop-panel-button" type="button" data-destination="controls">Controls</button><button class="ghost-button desktop-panel-button" type="button" data-destination="settings">Settings</button><button id="toggleControls" class="ghost-button controls-toggle-button" type="button" aria-pressed="false">Hide controls</button><div id="powerMenu" class="power-menu hidden"><button type="button" class="power-menu-item" data-power-action="lock">Lock</button><button type="button" class="power-menu-item" data-power-action="sleep">Sleep</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="restart">Restart</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="shutdown">Shut down</button></div></div>
     </header>
 
-    <main id="viewerShell" class="viewer-shell">
-      <img id="remoteView" alt="Selected window stream">
-      <div id="touchLayer" class="touch-layer"></div>
-      <div id="emptyState" class="empty-state" hidden></div>
-      <div id="statusPill" class="status-pill">Ready</div>
-    </main>
+    <main id="viewerShell" class="viewer-shell"><img id="remoteView" alt="Selected window stream"><div id="touchLayer" class="touch-layer"></div><div class="viewer-status" aria-live="polite"><output id="gestureStatus" hidden></output></div><div id="emptyState" class="empty-state" hidden></div></main>
 
-    <section id="keyboardPanel" class="keyboard-panel hidden">
-      <div class="composer-actions">
-        <button id="toggleMessageHistory" class="ghost-button message-history-toggle" type="button" hidden>
-          Show past messages
-        </button>
-        <button id="clearTextInput" class="ghost-button composer-clear-button" type="button">Clear Chat</button>
-      </div>
-      <section id="messageHistorySection" class="message-history-section" hidden>
-        <p class="eyebrow">Past messages</p>
-        <div id="messageHistory" class="message-history-list"></div>
-      </section>
-      <form id="textForm" class="text-form">
-        <textarea
-          id="textInput"
-          inputmode="text"
-          autocomplete="off"
-          autocapitalize="sentences"
-          spellcheck="true"
-          rows="1"
-          placeholder="Your phone keyboard now types into the selected PC window"
-        ></textarea>
-        <button id="sendText" class="primary-button" type="submit">Send</button>
-      </form>
+    <section id="keyboardPanel" class="keyboard-panel hidden" data-panel="keyboard">
+      <div class="composer-actions"><button id="toggleMessageHistory" class="ghost-button message-history-toggle" type="button" hidden>Show past messages</button><button id="voiceInput" class="ghost-button" type="button">Voice</button><button id="clearTextInput" class="ghost-button composer-clear-button" type="button">Clear</button></div>
+      <div class="shortcut-row" aria-label="PC keyboard shortcuts"><button type="button" data-special-key="tab">Tab</button><button type="button" data-special-key="escape">Esc</button><button type="button" data-special-key="left" aria-label="Left arrow">←</button><button type="button" data-special-key="up" aria-label="Up arrow">↑</button><button type="button" data-special-key="down" aria-label="Down arrow">↓</button><button type="button" data-special-key="right" aria-label="Right arrow">→</button><button type="button" data-special-key="backspace">⌫</button><button type="button" data-special-key="delete">Del</button></div>
+      <section id="messageHistorySection" class="message-history-section" hidden><p class="eyebrow">Past messages</p><div id="messageHistory" class="message-history-list"></div></section>
+      <form id="textForm" class="text-form"><textarea id="textInput" inputmode="text" autocomplete="off" autocapitalize="sentences" spellcheck="true" rows="1" placeholder="Type into selected PC window"></textarea><button id="sendText" class="primary-button" type="submit">Send</button></form>
     </section>
 
-    <section id="authPanel" class="auth-panel">
-      <div class="auth-card">
-        <h2>Connect your phone</h2>
-        <p id="connectStatus" class="auth-status">Confirm the session code matches your PC, then tap Connect.</p>
-        <label class="device-name-field" for="pairingDeviceName">
-          <span>This phone will appear on the PC as</span>
-          <input id="pairingDeviceName" type="text" maxlength="80" autocomplete="nickname" spellcheck="false">
-        </label>
-        <p id="connectCodeDisplay" class="connect-code">----</p>
-        <div id="pairingApprovalCodeBlock" class="approval-code-block" hidden>
-          <span>Access code for this phone</span>
-          <p id="pairingApprovalCodeDisplay" class="connect-code">----</p>
-        </div>
-        <button id="connectButton" class="primary-button" type="button">Connect</button>
-      </div>
-    </section>
+    <nav id="mobileNav" class="mobile-nav" aria-label="App navigation">
+      <button type="button" data-destination="viewer" class="active"><span aria-hidden="true">▣</span><small>Viewer</small></button>
+      <button type="button" data-destination="windows"><span aria-hidden="true">▤</span><small>Windows</small></button>
+      <button type="button" data-destination="keyboard"><span aria-hidden="true">⌨</span><small>Keyboard</small></button>
+      <button type="button" data-destination="controls"><span aria-hidden="true">◎</span><small>Controls</small></button>
+      <button type="button" data-destination="settings"><span aria-hidden="true">⚙</span><small>Settings</small></button>
+    </nav>
+    <button id="revealControls" class="reveal-controls hidden" type="button">Show controls</button>
 
+    <dialog id="gestureHelp" class="gesture-help"><form method="dialog"><h2>Touch gestures</h2><ul><li>Tap: click</li><li>One-finger drag: pan viewer</li><li>Hold two fingers until Scroll ready, then drag: scroll PC content</li><li>Pinch: zoom viewer</li><li>One-finger long press: right-click</li></ul><button class="primary-button" value="close">Got it</button></form></dialog>
+
+    <section id="authPanel" class="auth-panel"><div class="auth-card"><h2>Connect your phone</h2><p id="connectStatus" class="auth-status">Confirm session code matches PC, then tap Connect.</p><label class="device-name-field" for="pairingDeviceName"><span>This phone will appear on PC as</span><input id="pairingDeviceName" type="text" maxlength="80" autocomplete="nickname" spellcheck="false"></label><p id="connectCodeDisplay" class="connect-code">----</p><div id="pairingApprovalCodeBlock" class="approval-code-block" hidden><span>Access code for this phone</span><p id="pairingApprovalCodeDisplay" class="connect-code">----</p></div><button id="connectButton" class="primary-button" type="button">Connect</button></div></section>
     <div id="toast" class="toast hidden"></div>
   </div>
-  <script src="/assets/app.js?v=20260706b" defer></script>
+  <script src="/assets/gestures.js?v=20260716j" defer></script>
+  <script src="/assets/app.js?v=20260716j" defer></script>
 </body>
 </html>

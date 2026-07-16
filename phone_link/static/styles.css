@@ -27,8 +27,10 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
+  max-width: 100%;
 }
 
 button {
@@ -38,6 +40,8 @@ button {
   color: #f8faff;
   padding: 0.85rem 1rem;
   min-height: 3rem;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 button:disabled {
@@ -85,8 +89,8 @@ button.mode-active {
   grid-row: 2;
   position: relative;
   z-index: 15;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
   padding: 0.7rem 0.9rem 0.85rem;
@@ -94,24 +98,20 @@ button.mode-active {
   background: linear-gradient(0deg, rgba(6, 10, 18, 0.96), rgba(6, 10, 18, 0.3));
 }
 
-.title-stack {
-  min-width: 0;
-  display: grid;
-  gap: 0.15rem;
-}
-
-.title-stack strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .topbar-actions {
+  flex: 1 1 18rem;
+  min-width: 0;
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 0.55rem;
+}
+
+.topbar-actions > button {
+  flex: 1 1 5.5rem;
+  min-width: 0;
 }
 
 .power-menu {
@@ -180,6 +180,44 @@ button.mode-active {
   z-index: 6;
 }
 
+.viewer-status {
+  position: absolute;
+  z-index: 8;
+  top: calc(0.6rem + env(safe-area-inset-top));
+  right: 0.6rem;
+  display: flex;
+  gap: 0.4rem;
+  pointer-events: none;
+}
+
+.viewer-status output {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid rgba(160, 184, 235, 0.24);
+  border-radius: 999px;
+  background: rgba(7, 14, 27, 0.76);
+  color: #eaf1ff;
+  font-size: 0.72rem;
+  backdrop-filter: blur(8px);
+}
+
+.viewer-status output[hidden] { display: none; }
+
+.shortcut-row {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding: 0.1rem 0 0.35rem;
+  scrollbar-width: thin;
+}
+
+.shortcut-row button {
+  flex: 0 0 auto;
+  min-width: 3rem;
+  min-height: 2.5rem;
+  padding: 0.4rem 0.65rem;
+  border-radius: 0.75rem;
+}
+
 .empty-state {
   position: absolute;
   inset: 0;
@@ -189,17 +227,9 @@ button.mode-active {
   z-index: 4;
 }
 
-.status-pill {
-  position: absolute;
-  top: 0.85rem;
-  right: 0.85rem;
-  z-index: 10;
-  padding: 0.4rem 0.7rem;
-  border-radius: 999px;
-  background: rgba(7, 14, 29, 0.78);
-  border: 1px solid rgba(94, 122, 194, 0.28);
-  color: #c2cff0;
-  font-size: 0.82rem;
+.controls-toggle-button {
+  min-width: 0;
+  padding-inline: 0.7rem;
 }
 
 .viewer-shell.phone-fit-active {
@@ -208,11 +238,22 @@ button.mode-active {
     #010204;
 }
 
+.viewer-shell.direct-touch-active {
+  cursor: default;
+}
+
+.drawer-settings input:disabled {
+  opacity: 0.42;
+}
+
+.diagnostics-section { display: grid; gap: 0.65rem; min-width: 0; }
+.diagnostics-path { margin: 0; color: #9fb1d4; font-size: 0.78rem; overflow-wrap: anywhere; }
+
 .control-bar {
   position: relative;
   z-index: 15;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr));
   gap: 0.55rem;
   padding: 0.75rem 0.8rem;
   background: rgba(6, 10, 18, 0.94);
@@ -275,7 +316,7 @@ button.mode-active {
 
 .composer-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
   gap: 0.55rem;
 }
 
@@ -334,11 +375,13 @@ button.mode-active {
   left: 0;
   bottom: 0;
   width: min(23rem, 88vw);
+  max-width: 100%;
   padding: 1rem 0.9rem;
   background: rgba(7, 12, 21, 0.98);
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   transform: translateX(-102%);
   transition: transform 0.2s ease;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -348,6 +391,7 @@ button.mode-active {
 
 .drawer-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.8rem;
@@ -374,6 +418,7 @@ button.mode-active {
 
 .setting-label {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
@@ -401,7 +446,7 @@ button.mode-active {
 
 .drawer-button-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
   gap: 0.55rem;
 }
 
@@ -424,6 +469,7 @@ button.mode-active {
 
 .trusted-devices-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
@@ -494,13 +540,9 @@ button.mode-active {
   padding-block: 0.55rem;
 }
 
-.viewer-shell.direct-touch-active .status-pill {
-  border-color: rgba(255, 152, 93, 0.38);
-  color: #ffe2cf;
-}
-
 .toggle-setting {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.85rem;
@@ -610,7 +652,7 @@ button.mode-active {
 
 .auth-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
   gap: 0.55rem;
 }
 
@@ -633,7 +675,7 @@ button.mode-active {
   display: none;
 }
 
-@media (min-width: 900px) {
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
   #app {
     grid-template-columns: 22rem minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto auto;
@@ -654,7 +696,104 @@ button.mode-active {
     grid-column: 2;
   }
 
-  #toggleDrawer {
-    display: none;
-  }
+}
+
+#app.controls-hidden {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#app.controls-hidden .control-bar,
+#app.controls-hidden .window-drawer {
+  display: none;
+}
+
+#app.controls-hidden .topbar,
+#app.controls-hidden .viewer-shell,
+#app.controls-hidden .keyboard-panel {
+  grid-column: 1 / -1;
+}
+
+.utility-panel {
+  position: absolute;
+  z-index: 26;
+  inset: 0 0 0 auto;
+  width: min(25rem, 94vw);
+  padding: 1rem 0.9rem calc(5rem + env(safe-area-inset-bottom));
+  overflow: hidden auto;
+  background: rgba(7, 12, 21, 0.985);
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  transform: translateX(102%);
+  transition: transform 0.2s ease;
+}
+
+.mobile-panel.panel-open {
+  transform: translateX(0);
+}
+
+.mobile-nav {
+  grid-row: 4;
+  z-index: 28;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  padding: 0.35rem 0.25rem calc(0.35rem + env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(7, 12, 21, 0.98);
+}
+
+.mobile-nav button {
+  display: grid;
+  justify-items: center;
+  gap: 0.15rem;
+  min-width: 0;
+  min-height: 3.25rem;
+  padding: 0.35rem 0.1rem;
+  border: 0;
+  border-radius: 0.75rem;
+  background: transparent;
+  color: #9fb0cf;
+}
+
+.mobile-nav button.active {
+  background: rgba(80, 126, 255, 0.18);
+  color: #fff;
+}
+
+.mobile-nav small { font-size: 0.68rem; }
+.setting-help, .install-card p { margin: 0; color: #aebdd5; line-height: 1.45; font-size: 0.9rem; }
+.install-card { display: grid; gap: 0.65rem; padding: 0.9rem; border: 1px solid rgba(92, 132, 255, 0.3); border-radius: 1rem; background: rgba(49, 89, 223, 0.1); }
+.connection-status { padding: 0.35rem 0.6rem; border-radius: 999px; background: rgba(255, 173, 66, 0.15); color: #ffd08a; font-size: 0.78rem; }
+.connection-status.connected { background: rgba(55, 200, 130, 0.14); color: #9ff0c8; }
+.settings-power-section { display: grid; gap: 0.65rem; min-width: 0; padding: 0.9rem; border: 1px solid rgba(143, 162, 202, 0.22); border-radius: 1rem; background: rgba(255, 255, 255, 0.035); }
+.settings-power-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.55rem; }
+.settings-power-menu { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: 0.45rem; min-width: 0; }
+.settings-power-menu.hidden { display: none; }
+.settings-power-menu .power-menu-item { min-width: 0; text-align: center; white-space: normal; overflow-wrap: anywhere; }
+.gesture-help { width: min(28rem, calc(100vw - 2rem)); border: 1px solid rgba(126,151,213,.35); border-radius: 1.25rem; background: #0c1424; color: #f4f7ff; }
+.gesture-help::backdrop { background: rgba(0,0,0,.65); }
+.gesture-help form { display: grid; gap: 1rem; }
+.gesture-help h2 { margin: 0; }
+.gesture-help li { margin: 0.55rem 0; }
+.reveal-controls { position: absolute; z-index: 30; left: 50%; bottom: calc(0.75rem + env(safe-area-inset-bottom)); transform: translateX(-50%); min-height: 2.6rem; padding: 0.45rem 0.9rem; background: rgba(8,16,31,.85); }
+.reveal-controls.hidden { display: none; }
+
+@media (max-width: 899px), (hover: none) and (pointer: coarse) and (max-width: 1366px) {
+  #app { grid-template-rows: minmax(0, 1fr) auto auto auto; padding-bottom: 0; }
+  .topbar { display: none; }
+  .window-drawer { bottom: calc(4rem + env(safe-area-inset-bottom)); width: min(25rem, 94vw); }
+  .window-drawer.open:not(.panel-open) { transform: translateX(-102%); }
+  .keyboard-panel { grid-row: 3; max-height: min(48vh, 24rem); overflow: auto; }
+  #app.controls-hidden .mobile-nav, #app.controls-hidden .topbar { display: none; }
+  #app.controls-hidden { grid-template-rows: minmax(0, 1fr); }
+}
+
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .mobile-nav { display: none; }
+  .utility-panel { top: 0; bottom: 0; }
+  .window-drawer.mobile-panel { transform: none; }
+}
+
+@media (max-width: 360px) {
+  button { padding-inline: 0.65rem; }
+  .mobile-nav small { font-size: 0.62rem; }
+  .utility-panel, .window-drawer { width: 100vw; }
 }

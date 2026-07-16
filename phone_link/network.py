@@ -5,7 +5,7 @@ import socket
 from .logging_utils import log_event
 
 
-def discover_access_urls(port: int, token: str | None = None) -> list[str]:
+def discover_access_urls(port: int) -> list[str]:
     """Return LAN-friendly URLs that can be opened from the phone."""
     candidates: list[str] = []
     discovered_addresses: list[str] = []
@@ -18,7 +18,7 @@ def discover_access_urls(port: int, token: str | None = None) -> list[str]:
             return
         seen.add(ip_address)
         discovered_addresses.append(ip_address)
-        candidates.append(_build_access_url(ip_address, port, token))
+        candidates.append(_build_access_url(ip_address, port))
 
     try:
         hostname = socket.gethostname()
@@ -37,7 +37,7 @@ def discover_access_urls(port: int, token: str | None = None) -> list[str]:
     used_loopback = False
     if not candidates:
         used_loopback = True
-        candidates.append(_build_access_url("127.0.0.1", port, token))
+        candidates.append(_build_access_url("127.0.0.1", port))
 
     log_event(
         "network",
@@ -52,8 +52,5 @@ def discover_access_urls(port: int, token: str | None = None) -> list[str]:
     return candidates
 
 
-def _build_access_url(ip_address: str, port: int, token: str | None) -> str:
-    base_url = f"http://{ip_address}:{port}/"
-    if not token:
-        return base_url
-    return f"{base_url}?token={token}"
+def _build_access_url(ip_address: str, port: int) -> str:
+    return f"http://{ip_address}:{port}/"

@@ -35,28 +35,25 @@ def host_executable() -> Path:
 
 def launcher_executable() -> Path:
     if is_frozen():
-        return Path(sys.executable).resolve()
+        return app_root() / LAUNCHER_EXE_NAME
     return app_root() / "run_phone_link_launcher.py"
 
 
-def host_launch_command(
+def host_startup_arguments(
     *,
-    target_host: str,
-    target_port: int,
-    access_token: str,
+    host_bind: str,
+    port: int,
     default_fps: int,
-    wake_relay_url: str | None = None,
+    wake_relay_url: str | None,
 ) -> list[str]:
     host_path = host_executable()
     if is_frozen():
         command = [
             str(host_path),
             "--host",
-            target_host,
+            host_bind,
             "--port",
-            str(target_port),
-            "--token",
-            access_token,
+            str(port),
             "--fps",
             str(default_fps),
         ]
@@ -65,66 +62,13 @@ def host_launch_command(
             sys.executable,
             str(host_path),
             "--host",
-            target_host,
+            host_bind,
             "--port",
-            str(target_port),
-            "--token",
-            access_token,
+            str(port),
             "--fps",
             str(default_fps),
         ]
 
-    if wake_relay_url:
-        command.extend(["--wake-relay-url", wake_relay_url])
-    return command
-
-
-def launcher_startup_arguments(
-    *,
-    token: str | None,
-    launcher_host: str,
-    launcher_port: int,
-    target_host: str,
-    target_port: int,
-    default_fps: int,
-    wake_relay_url: str | None,
-) -> list[str]:
-    if is_frozen():
-        command = [
-            str(launcher_executable()),
-            "--host",
-            launcher_host,
-            "--port",
-            str(launcher_port),
-            "--target-host",
-            target_host,
-            "--target-port",
-            str(target_port),
-            "--fps",
-            str(default_fps),
-            "--auto-start-host",
-        ]
-    else:
-        command = [
-            str(app_root() / "run_phone_link_launcher.py"),
-            "--host",
-            launcher_host,
-            "--port",
-            str(launcher_port),
-            "--target-host",
-            target_host,
-            "--target-port",
-            str(target_port),
-            "--fps",
-            str(default_fps),
-            "--auto-start-host",
-        ]
-
-    if token:
-        normalized_token = token.strip().upper()
-        if not normalized_token:
-            raise ValueError("The access token cannot be empty.")
-        command.extend(["--token", normalized_token])
     if wake_relay_url is not None:
         normalized_wake_url = wake_relay_url.strip()
         if not normalized_wake_url:

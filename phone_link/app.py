@@ -34,12 +34,19 @@ from .host_access import (
     touch_paired_browser,
 )
 from .logging_utils import log_event, summarize_http_request, summarize_websocket
+from .gesture_diagnostics import (
+    clear_gesture_logs,
+    diagnostics_path,
+    gesture_context,
+    log_gesture,
+)
 from .network import discover_access_urls
 from .streaming import MAX_STREAM_FPS, register_stream_routes
 from .windows_host import (
     FULLSCREEN_TARGET_HWND,
     WindowLookupError,
     adjust_system_text_size,
+    cancel_active_touch,
     fit_window_to_viewport,
     focus_window,
     get_system_text_scale,
@@ -68,6 +75,12 @@ class PointerRequest(BaseModel):
     delta: int = 0
     delta_x: float = 0.0
     delta_y: float = 0.0
+    request_id: str = Field(default="", max_length=80)
+    session_id: str = Field(default="", max_length=80)
+    gesture_id: str = Field(default="", max_length=80)
+    control_mode: str = Field(default="unknown", max_length=20)
+    pointer_count: int = Field(default=0, ge=0, le=10)
+    pointer_type: str = Field(default="unknown", max_length=20)
 
 
 class TextRequest(BaseModel):
@@ -110,6 +123,12 @@ class ClientLogEntry(BaseModel):
 class ClientLogRequest(BaseModel):
     category: str
     entries: list[ClientLogEntry] = Field(default_factory=list)
+
+
+class GestureCancelRequest(BaseModel):
+    session_id: str = Field(default="", max_length=80)
+    gesture_id: str = Field(default="", max_length=80)
+    reason: str = Field(default="lifecycle", max_length=40)
 
 
 def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | None = None) -> FastAPI:
@@ -171,7 +190,7 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
     @app.middleware("http")
     async def disable_ui_caching(request: Request, call_next):
         response = await call_next(request)
-        if request.url.path == "/" or request.url.path.startswith("/assets/"):
+        if request.url.path == "/" or request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
@@ -182,6 +201,18 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
     @app.get("/")
     async def root() -> HTMLResponse:
         return HTMLResponse(content=_render_index_html(app), media_type="text/html")
+
+    @app.get("/sw.js")
+    async def service_worker() -> FileResponse:
+        return FileResponse(
+            STATIC_DIR / "sw.js",
+            media_type="text/javascript",
+            headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+        )
+
+    @app.get("/manifest.webmanifest")
+    async def web_manifest() -> FileResponse:
+        return FileResponse(STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json")
 
     @app.get("/api/connect-info")
     async def connect_info() -> dict[str, str]:
@@ -227,6 +258,7 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
             "text_scale": text_scale,
             "wake_relay_url": app.state.wake_relay_url,
             "wake_relay_configured": bool(app.state.wake_relay_url),
+            "gesture_log_path": str(diagnostics_path()),
         }
 
     @app.get("/api/trusted-devices")
@@ -345,8 +377,27 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
             "client-log-batch-received",
             {"category": payload.category, "entry_count": len(payload.entries)},
         )
-        _append_client_log(payload.category, payload.entries)
+        if payload.category.strip().lower() == "gesture":
+            for entry in payload.entries[:100]:
+                log_gesture(entry.event, {**entry.details, "client_time": entry.at or ""})
+        else:
+            _append_client_log(payload.category, payload.entries)
         return {"ok": True}
+
+    @app.post("/api/diagnostics/gestures/clear")
+    async def clear_gesture_diagnostics(request: Request) -> dict[str, bool]:
+        _require_token(app, request)
+        clear_gesture_logs()
+        return {"ok": True}
+
+    @app.post("/api/gestures/cancel")
+    async def cancel_gesture(payload: GestureCancelRequest, request: Request) -> dict[str, bool]:
+        _require_token(app, request)
+        with gesture_context(
+            {"session_id": payload.session_id, "gesture_id": payload.gesture_id, "reason": payload.reason}
+        ):
+            released = cancel_active_touch(gesture_id=payload.gesture_id, reason=payload.reason)
+        return {"ok": True, "released": released}
 
     @app.post("/api/windows/{hwnd}/activate")
     async def activate_window(hwnd: int, payload: ActivateRequest, request: Request) -> dict[str, Any]:
@@ -439,20 +490,41 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
     @app.post("/api/windows/{hwnd}/pointer")
     async def pointer(hwnd: int, payload: PointerRequest, request: Request) -> dict[str, Any]:
         _require_token(app, request)
-        log_event("host", "pointer-requested", _summarize_pointer_request(hwnd, payload))
-        _handle_window_action(
-            lambda: handle_pointer(
-                hwnd,
-                payload.action,
-                payload.x,
-                payload.y,
-                payload.delta,
-                payload.delta_x,
-                payload.delta_y,
+        context = _gesture_request_context(hwnd, payload)
+        started_at = time.perf_counter()
+        with gesture_context(context):
+            log_gesture("server-received", {"state": "dispatch"})
+            try:
+                _handle_window_action(
+                    lambda: handle_pointer(
+                        hwnd,
+                        payload.action,
+                        payload.x,
+                        payload.y,
+                        payload.delta,
+                        payload.delta_x,
+                        payload.delta_y,
+                        gesture_id=payload.gesture_id,
+                    )
+                )
+            except HTTPException as error:
+                cause = error.__cause__
+                log_gesture(
+                    "server-failed",
+                    {
+                        "duration_ms": (time.perf_counter() - started_at) * 1000,
+                        "error_code": getattr(cause, "winerror", None) or getattr(cause, "errno", 0) or 0,
+                        "error_type": type(cause or error).__name__,
+                        "result": "native-touch-error" if payload.action.startswith("touch_") else "pointer-error",
+                    },
+                    level="error",
+                )
+                raise
+            log_gesture(
+                "server-finished",
+                {"duration_ms": (time.perf_counter() - started_at) * 1000, "result": "ok"},
             )
-        )
         cursor = get_window_cursor_state(hwnd)
-        log_event("host", "pointer-finished", {"hwnd": hwnd, "action": payload.action, "cursor": cursor})
         return {"ok": True, "cursor": cursor}
 
     @app.post("/api/windows/{hwnd}/text")
@@ -490,7 +562,7 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
                 payload = await websocket.receive_json()
                 try:
                     _dispatch_websocket_message(payload)
-                except (WindowLookupError, RuntimeError, ValueError, pywintypes.error) as error:
+                except (OSError, WindowLookupError, RuntimeError, ValueError, pywintypes.error) as error:
                     log_event(
                         "host",
                         "websocket-message-failed",
@@ -741,6 +813,24 @@ def _summarize_pointer_request(hwnd: int, payload: PointerRequest) -> dict[str, 
     }
 
 
+def _gesture_request_context(hwnd: int, payload: PointerRequest) -> dict[str, Any]:
+    return {
+        "request_id": payload.request_id,
+        "session_id": payload.session_id,
+        "gesture_id": payload.gesture_id,
+        "control_mode": payload.control_mode,
+        "pointer_count": payload.pointer_count,
+        "pointer_type": payload.pointer_type,
+        "action": payload.action,
+        "x": payload.x,
+        "y": payload.y,
+        "delta": payload.delta,
+        "delta_x": payload.delta_x,
+        "delta_y": payload.delta_y,
+        "target": "desktop" if hwnd == FULLSCREEN_TARGET_HWND else "window",
+    }
+
+
 def _summarize_text_request(hwnd: int, text: str) -> dict[str, Any]:
     line_count = max(len(text.splitlines()), 1) if text else 0
     return {
@@ -839,14 +929,16 @@ def _require_localhost(request: Request) -> None:
 
 
 def _require_token(app: FastAPI, request: Request) -> str:
-    provided = request.headers.get("X-Access-Token") or request.query_params.get("token")
-    if not provided:
+    token = (request.headers.get("X-Access-Token") or request.query_params.get("token") or "").strip()
+    if not token:
         raise HTTPException(status_code=401, detail="Connect your phone to use PC Phone Link.")
 
-    for entry in app.state.paired_browsers:
-        if str(entry.get("token", "")).strip() == provided:
-            touch_paired_browser(app.state.paired_browsers, provided)
-            return provided
+    if _touch_paired_token(app, token):
+        return token
+
+    app.state.paired_browsers = load_paired_browsers()
+    if _touch_paired_token(app, token):
+        return token
 
     raise HTTPException(status_code=401, detail="Connect your phone to use PC Phone Link.")
 
@@ -855,6 +947,13 @@ def _paired_token_allowed(app: FastAPI, provided: str | None) -> bool:
     token = (provided or "").strip()
     if not token:
         return False
+    if _touch_paired_token(app, token):
+        return True
+    app.state.paired_browsers = load_paired_browsers()
+    return _touch_paired_token(app, token)
+
+
+def _touch_paired_token(app: FastAPI, token: str) -> bool:
     for entry in app.state.paired_browsers:
         if str(entry.get("token", "")).strip() == token:
             touch_paired_browser(app.state.paired_browsers, token)
@@ -884,5 +983,5 @@ def _handle_window_action(callback: Any) -> None:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    except (RuntimeError, pywintypes.error) as error:
+    except (OSError, RuntimeError, pywintypes.error) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

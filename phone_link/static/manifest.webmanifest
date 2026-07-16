@@ -1,0 +1,21 @@
+{
+  "name": "PC Phone Link",
+  "short_name": "Phone Link",
+  "description": "Touch-first remote control for your Windows PC.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["fullscreen", "standalone"],
+  "background_color": "#07101f",
+  "theme_color": "#07101f",
+  "orientation": "any",
+  "icons": [
+    { "src": "/assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Open viewer", "short_name": "Viewer", "url": "/#viewer" },
+    { "name": "Choose window", "short_name": "Windows", "url": "/#windows" }
+  ]
+}

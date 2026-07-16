@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import time
+import threading
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -28,6 +29,9 @@ def _default_log_dir() -> Path:
 
 
 LOG_DIR = _default_log_dir()
+MAX_LOG_BYTES = 2 * 1024 * 1024
+MAX_LOG_FILES = 4
+_LOG_LOCK = threading.Lock()
 
 
 def component_log_path(component: str) -> Path:
@@ -186,8 +190,23 @@ def _iter_multi_items(values: Any) -> list[tuple[str, Any]]:
 
 def _write_json_line(path: Path, payload: dict[str, Any]) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as log_file:
-            log_file.write(json.dumps(payload, ensure_ascii=True) + "\n")
+        encoded = json.dumps(payload, ensure_ascii=True) + "\n"
+        with _LOG_LOCK:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                size = path.stat().st_size
+            except OSError:
+                size = 0
+            if size + len(encoded.encode("utf-8")) > MAX_LOG_BYTES:
+                oldest = Path(f"{path}.{MAX_LOG_FILES - 1}")
+                oldest.unlink(missing_ok=True)
+                for index in range(MAX_LOG_FILES - 2, 0, -1):
+                    source = Path(f"{path}.{index}")
+                    if source.exists():
+                        source.replace(Path(f"{path}.{index + 1}"))
+                if path.exists():
+                    path.replace(Path(f"{path}.1"))
+            with path.open("a", encoding="utf-8") as log_file:
+                log_file.write(encoded)
     except OSError as error:
         sys.stderr.write(f"[PC Phone Link logging] Could not write log file {path}: {error}\n")

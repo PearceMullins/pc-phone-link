@@ -52,7 +52,7 @@ Stream individual windows or your full desktop, send touch and keyboard input, m
 
 ### Release (recommended)
 
-1. Download [`PCPhoneLink-Windows-x64-v1.0.0.zip`](https://github.com/PearceMullins/pc-phone-link/releases/latest) from **Releases**
+1. Download [`PCPhoneLink-Windows-x64-v2.0.0.zip`](https://github.com/PearceMullins/pc-phone-link/releases/latest) from **Releases**
 2. Extract the zip
 3. Run **`PCPhoneLinkHost.exe`** — a desktop window opens with your connect code and connected phones
 4. On your phone, open the **URL** shown in the window or console (e.g. `http://192.168.1.10:8765/`)

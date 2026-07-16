@@ -10,7 +10,7 @@ This guide covers installing PC Phone Link on Windows using the release bundle o
 
 ## Option A — Release download (recommended)
 
-1. Open [GitHub Releases](https://github.com/PearceMullins/pc-phone-link/releases) and download `PCPhoneLink-Windows-x64-v1.0.0.zip`
+1. Open [GitHub Releases](https://github.com/PearceMullins/pc-phone-link/releases) and download `PCPhoneLink-Windows-x64-v2.0.0.zip`
 2. Extract the zip to a folder such as `C:\Program Files\PC Phone Link\`
 3. Run **`PCPhoneLinkHost.exe`**
 4. Note the **URL** and **connect code** printed in the console

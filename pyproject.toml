@@ -1,7 +1,7 @@
 # Project metadata, version number, and Python package definition.
 [project]
 name = "pc-phone-link"
-version = "1.0.0"
+version = "2.0.0"
 description = "Control Windows from your phone browser — window streaming, input, pairing, and Wake-on-LAN."
 readme = "README.md"
 requires-python = ">=3.11"

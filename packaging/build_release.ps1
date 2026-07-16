@@ -41,11 +41,11 @@ $ReadmePath = Join-Path $ReleaseDir "README.txt"
 @(
     "PC Phone Link v$Version"
     ""
-    "1. Run PCPhoneLinkLauncher.exe"
-    "2. Open the launcher URL on your phone (printed in the console)"
-    "3. Tap Start controls and approve pairing on the PC and phone"
+    "1. Run PCPhoneLinkHost.exe"
+    "2. Open the host URL on your phone (shown in the desktop window)"
+    "3. Confirm the connect code and approve the phone on the PC"
     ""
-    "Keep PCPhoneLinkHost.exe in the same folder as the launcher."
+    "PCPhoneLinkLauncher.exe is a deprecated compatibility wrapper."
     "Documentation: https://github.com/PearceMullins/pc-phone-link"
 ) | Set-Content -Path $ReadmePath -Encoding UTF8
 

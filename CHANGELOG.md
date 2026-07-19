@@ -6,6 +6,13 @@ All notable changes to PC Phone Link are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-07-18
+
+### Changed
+
+- **Hold-and-drag scroll** — After Scroll ready, keep one finger still and drag the other anywhere to scroll PC content; pinch remains immediate when fingers move apart
+- **Default Full screen** — On first connect in a session, the viewer opens on desktop capture instead of an empty window picker
+
 ## [2.0.0] - 2026-07-16
 
 ### Added
@@ -17,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Gesture arbitration** â€” One-finger drag pans only the zoomed viewer; two-finger scroll requires a deliberate hold and Scroll ready acknowledgement; clear pinch stays immediate and mode-locked; tap remains direct click
+- **Gesture arbitration** — One-finger drag pans only the zoomed viewer; two-finger scroll requires a deliberate hold and Scroll ready acknowledgement; clear pinch stays immediate and mode-locked; tap remains direct click
 - **Native touch reliability** — Release and cancel frames reuse Windows-required prior coordinates, press-and-hold sends keepalive updates, failed contacts reset cleanly, and cursor guard survives rapid gesture bursts
 - **Mobile reliability polish** — Added gesture acknowledgement, recent-app ordering, keyboard shortcut row, and automatic reconnect recovery
 - **Stable Viewer** — Successful window activation opens Viewer; passive cursor/window/stream updates, reconnects, keyboard changes, and viewport changes preserve camera focus, zoom, and PC window geometry
@@ -49,5 +56,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Screen capture safeguards and permission diagnostics for blocked capture scenarios
 - Access token required for all host and launcher API calls
 
+[2.1.0]: https://github.com/PearceMullins/pc-phone-link/releases/tag/v2.1.0
 [2.0.0]: https://github.com/PearceMullins/pc-phone-link/releases/tag/v2.0.0
 [1.0.0]: https://github.com/PearceMullins/pc-phone-link/releases/tag/v1.0.0

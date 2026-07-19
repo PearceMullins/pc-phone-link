@@ -10,7 +10,7 @@
   <title>PC Phone Link</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="/assets/styles.css?v=20260716j">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260718a">
 </head>
 <body>
   <div id="app">
@@ -27,12 +27,12 @@
       <section id="controlBar" class="drawer-settings">
         <label class="setting-label" for="controlMode"><span>Control style</span></label>
         <select id="controlMode" class="setting-select"><option value="touch">App touch</option><option value="trackpad">Mouse trackpad</option></select>
-        <p id="controlModeHelp" class="setting-help">Tap to click, one finger to pan viewer, hold two fingers until Scroll ready then drag to scroll, pinch to zoom, long press to right-click.</p>
+        <p id="controlModeHelp" class="setting-help">Tap to click, double-tap to right-click, quick two-finger tap to double-click, one finger to pan viewer, hold two fingers until Scroll ready then hold one finger and drag the other to scroll, and pinch to zoom.</p>
         <label class="setting-label" for="mouseSpeed"><span>Mouse speed</span><strong id="mouseSpeedValue">2.50x</strong></label>
         <input id="mouseSpeed" class="speed-slider" type="range" min="0.5" max="8" step="0.1" value="2.5">
         <label class="toggle-setting" for="followMouse"><span>Follow mouse</span><input id="followMouse" type="checkbox"></label>
         <button id="gestureHelpButton" class="ghost-button" type="button">Gesture help</button>
-        <div class="drawer-button-row"><button id="rightClickMode" class="ghost-button" type="button">Right click</button><button id="doubleClickMode" class="ghost-button" type="button">Double click</button></div>
+        <div class="drawer-button-row"><button id="rightClickMode" class="ghost-button" type="button">Right-click next tap</button><button id="doubleClickMode" class="ghost-button" type="button">Double-click next tap</button></div>
         <div class="drawer-button-row"><button id="scrollUp" class="ghost-button" type="button">Scroll up</button><button id="scrollDown" class="ghost-button" type="button">Scroll down</button></div>
         <div class="drawer-button-row"><button id="focusWindow" class="ghost-button" type="button">Focus</button><button id="maximizeWindow" class="ghost-button" type="button">Maximize</button><button id="restoreWindow" class="ghost-button" type="button">Restore</button></div>
         <label class="setting-label" for="fitShape"><span>Screen shape</span><strong id="fitShapeValue">Phone</strong></label>
@@ -56,6 +56,7 @@
         <input id="textScale" class="speed-slider" type="range" min="100" max="225" step="1" value="100">
         <button id="applyTextScale" class="ghost-button" type="button" disabled>Apply text size</button>
         <div class="drawer-button-row"><button id="textSmaller" class="ghost-button" type="button">Smaller</button><button id="textLarger" class="ghost-button" type="button">Larger</button></div>
+        <section class="bottom-nav-settings" aria-labelledby="bottomNavTitle"><strong id="bottomNavTitle">Bottom bar</strong><p class="setting-help">Choose up to three shortcuts. Controls and Settings always stay available.</p><div id="bottomNavEditor" class="bottom-nav-editor"></div><div class="bottom-nav-add-row"><label class="sr-only" for="bottomNavAdd">Add shortcut</label><select id="bottomNavAdd" class="setting-select" aria-label="Shortcut to add"></select><button id="bottomNavAddButton" class="ghost-button" type="button">Add</button></div><button id="bottomNavReset" class="ghost-button" type="button">Reset bottom bar</button></section>
         <section class="settings-power-section" aria-labelledby="settingsPowerTitle"><div class="settings-power-header"><strong id="settingsPowerTitle">PC power</strong><button id="settingsPowerToggle" class="ghost-button compact-button" type="button" aria-expanded="false" aria-controls="settingsPowerMenu" aria-haspopup="true">Power controls</button></div><div id="settingsPowerMenu" class="settings-power-menu hidden"><button type="button" class="power-menu-item" data-power-action="lock">Lock</button><button type="button" class="power-menu-item" data-power-action="sleep">Sleep</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="restart">Restart</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="shutdown">Shut down</button></div></section>
         <section class="trusted-devices-section"><div class="trusted-devices-header"><span>Trusted phones</span><button id="refreshTrustedDevices" class="ghost-button compact-button" type="button">Refresh</button></div><p id="trustedDevicesStatus" class="trusted-devices-status">No saved phones loaded.</p><div id="trustedDevices" class="trusted-devices-list"></div></section>
         <section class="diagnostics-section"><label class="toggle-setting" for="gestureDiagnostics"><span>Gesture diagnostics</span><input id="gestureDiagnostics" type="checkbox" checked></label><p class="setting-help">Records gesture states, safe coordinates, delivery results, and Windows touch errors. Never records typed text, connection codes, addresses, tokens, or window names.</p><p id="gestureLogPath" class="diagnostics-path">Log path loads after connection.</p><button id="clearGestureLogs" class="ghost-button" type="button">Clear gesture logs</button></section>
@@ -75,21 +76,15 @@
       <form id="textForm" class="text-form"><textarea id="textInput" inputmode="text" autocomplete="off" autocapitalize="sentences" spellcheck="true" rows="1" placeholder="Type into selected PC window"></textarea><button id="sendText" class="primary-button" type="submit">Send</button></form>
     </section>
 
-    <nav id="mobileNav" class="mobile-nav" aria-label="App navigation">
-      <button type="button" data-destination="viewer" class="active"><span aria-hidden="true">▣</span><small>Viewer</small></button>
-      <button type="button" data-destination="windows"><span aria-hidden="true">▤</span><small>Windows</small></button>
-      <button type="button" data-destination="keyboard"><span aria-hidden="true">⌨</span><small>Keyboard</small></button>
-      <button type="button" data-destination="controls"><span aria-hidden="true">◎</span><small>Controls</small></button>
-      <button type="button" data-destination="settings"><span aria-hidden="true">⚙</span><small>Settings</small></button>
-    </nav>
+    <nav id="mobileNav" class="mobile-nav" aria-label="App navigation"></nav>
     <button id="revealControls" class="reveal-controls hidden" type="button">Show controls</button>
 
-    <dialog id="gestureHelp" class="gesture-help"><form method="dialog"><h2>Touch gestures</h2><ul><li>Tap: click</li><li>One-finger drag: pan viewer</li><li>Hold two fingers until Scroll ready, then drag: scroll PC content</li><li>Pinch: zoom viewer</li><li>One-finger long press: right-click</li></ul><button class="primary-button" value="close">Got it</button></form></dialog>
+    <dialog id="gestureHelp" class="gesture-help"><form method="dialog"><h2>Touch gestures</h2><ul><li>Tap: click</li><li>Double-tap: right-click</li><li>Quick two-finger tap: double-click</li><li>One-finger drag: pan viewer</li><li>Hold two fingers until Scroll ready, then hold one finger and drag the other: scroll PC content</li><li>Pinch: zoom viewer</li><li>Double-click next tap: send a PC double-click on your next tap</li></ul><button class="primary-button" value="close">Got it</button></form></dialog>
 
     <section id="authPanel" class="auth-panel"><div class="auth-card"><h2>Connect your phone</h2><p id="connectStatus" class="auth-status">Confirm session code matches PC, then tap Connect.</p><label class="device-name-field" for="pairingDeviceName"><span>This phone will appear on PC as</span><input id="pairingDeviceName" type="text" maxlength="80" autocomplete="nickname" spellcheck="false"></label><p id="connectCodeDisplay" class="connect-code">----</p><div id="pairingApprovalCodeBlock" class="approval-code-block" hidden><span>Access code for this phone</span><p id="pairingApprovalCodeDisplay" class="connect-code">----</p></div><button id="connectButton" class="primary-button" type="button">Connect</button></div></section>
     <div id="toast" class="toast hidden"></div>
   </div>
-  <script src="/assets/gestures.js?v=20260716j" defer></script>
-  <script src="/assets/app.js?v=20260716j" defer></script>
+  <script src="/assets/gestures.js?v=20260718a" defer></script>
+  <script src="/assets/app.js?v=20260718a" defer></script>
 </body>
 </html>

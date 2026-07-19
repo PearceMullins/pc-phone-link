@@ -48,5 +48,25 @@
       && motion.separationChange <= Math.max(threshold, motion.centroidMovement * 0.5);
   }
 
-  return { distance, midpoint, twoFingerMotion, classifyTwoFingerGesture, isParallelTwoFingerDrag };
+  function isHoldAndDragScroll(armA, armB, currentA, currentB, holdSlop = 10, dragThreshold = 6) {
+    const movementA = distance(armA, currentA);
+    const movementB = distance(armB, currentB);
+    const minDrag = Math.max(dragThreshold, holdSlop + 1);
+    if (movementA <= holdSlop && movementB >= minDrag) {
+      return { active: true, dragIndex: 1, anchorIndex: 0 };
+    }
+    if (movementB <= holdSlop && movementA >= minDrag) {
+      return { active: true, dragIndex: 0, anchorIndex: 1 };
+    }
+    return { active: false, dragIndex: -1, anchorIndex: -1 };
+  }
+
+  return {
+    distance,
+    midpoint,
+    twoFingerMotion,
+    classifyTwoFingerGesture,
+    isParallelTwoFingerDrag,
+    isHoldAndDragScroll,
+  };
 }));

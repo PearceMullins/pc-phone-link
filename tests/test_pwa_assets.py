@@ -39,9 +39,14 @@ def test_service_worker_caches_shell_not_authenticated_pages() -> None:
 
 def test_app_shell_declares_pwa_and_all_destinations() -> None:
     html = (STATIC / "index.html").read_text(encoding="utf-8")
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
     assert 'rel="manifest"' in html
-    for destination in ("viewer", "windows", "keyboard", "controls", "settings"):
+    for destination in ("controls", "settings"):
         assert f'data-destination="{destination}"' in html
+    assert 'id="mobileNav"' in html
+    assert 'id="bottomNavEditor"' in html
+    for shortcut in ("desktop", "windows", "keyboard", "controls", "settings"):
+        assert f'{shortcut}:' in script
 
 
 def test_app_shell_ids_match_javascript_references() -> None:

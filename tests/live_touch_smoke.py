@@ -93,7 +93,7 @@ def main() -> None:
         _assert_cursor_restored(baseline, "translated two-finger scroll")
 
         _touch(hwnd, "touch_hold", 0.45, 0.45)
-        _assert_cursor_restored(baseline, "long press")
+        _assert_cursor_restored(baseline, "right click")
 
         _touch(hwnd, "touch_down", 0.40, 0.60)
         _touch(hwnd, "touch_move", 0.45, 0.55)
@@ -113,7 +113,7 @@ def main() -> None:
         win32api.SetCursorPos(baseline)
         _touch(hwnd, "touch_tap", 0.52, 0.52)
         _assert_cursor_restored(baseline, "mode switch back to App touch")
-        print("live native touch: tap/swipe/scroll/hold/cancel/repeat/mode-switch ok; cursor invariant")
+        print("live native touch: tap/swipe/scroll/right-click/cancel/repeat/mode-switch ok; cursor invariant")
     finally:
         windows_host._stop_touch_cursor_guard(settle_seconds=0)
         if hwnd and win32gui.IsWindow(hwnd):

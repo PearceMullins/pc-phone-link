@@ -734,7 +734,7 @@ button.mode-active {
   grid-row: 4;
   z-index: 28;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--nav-count, 5), minmax(0, 1fr));
   padding: 0.35rem 0.25rem calc(0.35rem + env(safe-area-inset-bottom));
   border-top: 1px solid rgba(255, 255, 255, 0.09);
   background: rgba(7, 12, 21, 0.98);
@@ -759,6 +759,17 @@ button.mode-active {
 }
 
 .mobile-nav small { font-size: 0.68rem; }
+.mobile-nav small { max-width: 100%; text-align: center; white-space: normal; overflow-wrap: anywhere; line-height: 1.05; }
+.bottom-nav-settings { display: grid; gap: 0.65rem; min-width: 0; padding: 0.9rem; border: 1px solid rgba(143, 162, 202, 0.22); border-radius: 1rem; background: rgba(255, 255, 255, 0.035); }
+.bottom-nav-editor { display: grid; gap: 0.45rem; min-width: 0; }
+.bottom-nav-editor-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; min-width: 0; padding: 0.4rem; border-radius: 0.75rem; background: rgba(255, 255, 255, 0.04); }
+.bottom-nav-editor-row > span { min-width: 0; overflow-wrap: anywhere; }
+.bottom-nav-editor-row.mandatory { color: #aebdd5; }
+.bottom-nav-editor-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.3rem; }
+.bottom-nav-editor-actions button, .bottom-nav-add-row button { min-height: 44px; min-width: 44px; white-space: normal; }
+.bottom-nav-add-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.45rem; min-width: 0; }
+.bottom-nav-add-row select { min-width: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .setting-help, .install-card p { margin: 0; color: #aebdd5; line-height: 1.45; font-size: 0.9rem; }
 .install-card { display: grid; gap: 0.65rem; padding: 0.9rem; border: 1px solid rgba(92, 132, 255, 0.3); border-radius: 1rem; background: rgba(49, 89, 223, 0.1); }
 .connection-status { padding: 0.35rem 0.6rem; border-radius: 999px; background: rgba(255, 173, 66, 0.15); color: #ffd08a; font-size: 0.78rem; }

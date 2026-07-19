@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const {
   classifyTwoFingerGesture,
+  isHoldAndDragScroll,
   isParallelTwoFingerDrag,
   midpoint,
   twoFingerMotion,
@@ -55,6 +56,34 @@ assert.deepEqual(
     { x: 13, y: 12 }, { x: 53, y: 12 },
   ),
   { centroidMovement: Math.hypot(3, 2), separationChange: 0, movementA: Math.hypot(3, 2), movementB: Math.hypot(3, 2) },
+);
+assert.deepEqual(
+  isHoldAndDragScroll(
+    { x: 20, y: 20 }, { x: 80, y: 20 },
+    { x: 20, y: 22 }, { x: 80, y: 55 },
+  ),
+  { active: true, dragIndex: 1, anchorIndex: 0 },
+);
+assert.deepEqual(
+  isHoldAndDragScroll(
+    { x: 20, y: 20 }, { x: 80, y: 20 },
+    { x: 20, y: 55 }, { x: 82, y: 21 },
+  ),
+  { active: true, dragIndex: 0, anchorIndex: 1 },
+);
+assert.deepEqual(
+  isHoldAndDragScroll(
+    { x: 20, y: 20 }, { x: 80, y: 20 },
+    { x: 20, y: 55 }, { x: 80, y: 55 },
+  ),
+  { active: false, dragIndex: -1, anchorIndex: -1 },
+);
+assert.deepEqual(
+  isHoldAndDragScroll(
+    { x: 20, y: 20 }, { x: 80, y: 20 },
+    { x: 22, y: 22 }, { x: 83, y: 24 },
+  ),
+  { active: false, dragIndex: -1, anchorIndex: -1 },
 );
 
 console.log("gesture helpers: ok");

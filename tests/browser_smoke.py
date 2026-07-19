@@ -147,7 +147,9 @@ def main() -> None:
                             panelRight: visible?.right ?? innerWidth,
                             panelOverflow: panel ? panel.scrollWidth - panel.clientWidth : 0,
                             keyboardOpen: !elements.keyboardPanel.classList.contains('hidden'),
-                            controls: ['rightClickMode','doubleClickMode','scrollUp','scrollDown','focusWindow','maximizeWindow','restoreWindow','fitShape','streamFps','streamWidth','textScale','refreshTrustedDevices','voiceInput','powerToggle','fitToggle','toggleKeyboard','toggleControls'].every(id => document.getElementById(id)) && document.querySelectorAll('[data-special-key]').length === 8,
+                            controls: ['bottomNavEditor','bottomNavAdd','bottomNavReset','rightClickMode','doubleClickMode','scrollUp','scrollDown','focusWindow','maximizeWindow','restoreWindow','fitShape','streamFps','streamWidth','textScale','refreshTrustedDevices','voiceInput','powerToggle','fitToggle','toggleKeyboard','toggleControls'].every(id => document.getElementById(id)) && document.querySelectorAll('[data-special-key]').length === 8,
+                            bottomActions: Array.from(elements.mobileNav.querySelectorAll('[data-bottom-action]')).map(button => button.dataset.bottomAction),
+                            mandatoryEnabled: ['controls','settings'].every(id => !elements.mobileNav.querySelector(`[data-bottom-action="${id}"]`)?.disabled),
                             restoredMouseControls: ['controlMode','mouseSpeed','mouseSpeedValue','followMouse'].every(id => document.getElementById(id)) && Array.from(elements.controlMode.options).some(option => option.textContent === 'Mouse trackpad'),
                             removedModeBadge: !document.getElementById('controlModeBadge') && !document.querySelector('.viewer-status span'),
                           }};
@@ -164,6 +166,8 @@ def main() -> None:
                     assert report["panelLeft"] >= -1 and report["panelRight"] <= width + 1, report
                     assert report["panelOverflow"] <= 1, report
                     assert report["controls"], report
+                    assert report["bottomActions"] == ["desktop", "windows", "keyboard", "controls", "settings"], report
+                    assert report["mandatoryEnabled"], report
                     assert report["restoredMouseControls"], report
                     assert report["removedModeBadge"], report
                     assert report["keyboardOpen"] is (destination == "keyboard"), report
@@ -322,6 +326,251 @@ def main() -> None:
             assert selection_report["explicitMouseFollow"]["scale"] == selection_report["stable"]["scale"], selection_report
             assert selection_report["phoneFitCalls"] == [], selection_report
 
+            nav_report = browser.evaluate(
+                """(async () => {
+                  const realApiFetch = apiFetch;
+                  const realRefreshStream = refreshStream;
+                  const realRequestFullscreen = elements.app.requestFullscreen;
+                  const apiCalls = [];
+                  let fullscreenApiCalls = 0;
+                  let desktopAvailable = true;
+                  const desktop = { hwnd: -1, title: 'Full screen', process_name: 'desktop', is_desktop_capture: true, bounds: { width: 1920, height: 1080 } };
+                  const appWindow = { hwnd: 777, title: 'App', process_name: 'app.exe', bounds: { width: 1200, height: 800 } };
+                  elements.app.requestFullscreen = async () => { fullscreenApiCalls += 1; };
+                  apiFetch = async (path) => {
+                    apiCalls.push(path);
+                    if (path === '/api/windows') return { windows: desktopAvailable ? [appWindow, desktop] : [] };
+                    if (path === '/api/windows/-1/activate') return { window: desktop };
+                    if (path === '/api/windows/777/activate') return { window: appWindow };
+                    return { window: state.selectedWindow || appWindow };
+                  };
+                  refreshStream = () => {};
+                  state.windows = [appWindow, desktop];
+                  state.selectedWindow = null;
+                  state.defaultDesktopHandled = false;
+                  resetViewer();
+                  await maybeSelectDefaultDesktopCapture();
+                  const defaultDesktop = {
+                    selected: state.selectedWindow?.is_desktop_capture === true,
+                    hwnd: state.selectedWindow?.hwnd,
+                    handled: state.defaultDesktopHandled === true,
+                    destination: state.currentDestination,
+                    activateCalls: apiCalls.filter(path => path === '/api/windows/-1/activate').length,
+                  };
+                  state.selectedWindow = null;
+                  resetViewer();
+                  await maybeSelectDefaultDesktopCapture();
+                  const defaultDesktopOnce = {
+                    stayedEmpty: state.selectedWindow === null,
+                    activateCalls: apiCalls.filter(path => path === '/api/windows/-1/activate').length,
+                  };
+                  apiCalls.length = 0;
+                  updateSelectedWindow(appWindow);
+                  setCameraScale(2.1);
+                  setCameraFocus(0.38, 0.69);
+                  const cameraBeforeToggles = { scale: state.cameraScale, focus: { ...state.cameraFocus } };
+
+                  localStorage.removeItem(BOTTOM_NAV_STORAGE_KEY);
+                  loadBottomNavConfig();
+                  const defaults = Array.from(elements.mobileNav.querySelectorAll('[data-bottom-action]')).map(button => button.dataset.bottomAction);
+                  elements.mobileNav.querySelector('[data-bottom-action="desktop"]').click();
+                  for (let attempt = 0; attempt < 20 && !state.selectedWindow?.is_desktop_capture; attempt += 1) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                  }
+                  const desktopSelection = {
+                    selected: state.selectedWindow?.is_desktop_capture === true,
+                    hwnd: state.selectedWindow?.hwnd,
+                    destination: state.currentDestination,
+                    activateCalls: apiCalls.filter(path => path === '/api/windows/-1/activate').length,
+                    fullscreenApiCalls,
+                    active: elements.mobileNav.querySelector('[data-bottom-action="desktop"]').classList.contains('active'),
+                  };
+                  elements.mobileNav.querySelector('[data-bottom-action="desktop"]').click();
+                  for (let attempt = 0; attempt < 20 && state.selectedWindow?.hwnd !== appWindow.hwnd; attempt += 1) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                  }
+                  const desktopRestore = {
+                    hwnd: state.selectedWindow?.hwnd,
+                    destination: state.currentDestination,
+                    appActivateCalls: apiCalls.filter(path => path === '/api/windows/777/activate').length,
+                    active: elements.mobileNav.querySelector('[data-bottom-action="desktop"]').classList.contains('active'),
+                    camera: { scale: state.cameraScale, focus: { ...state.cameraFocus } },
+                  };
+                  desktopAvailable = false;
+                  state.windows = [];
+                  await executeBottomNavAction('desktop');
+                  const unavailableMessage = elements.toast.textContent;
+                  desktopAvailable = true;
+                  state.windows = [appWindow, desktop];
+                  updateSelectedWindow(appWindow);
+
+                  const panelVisible = (id) => id === 'windows'
+                    ? elements.windowDrawer.classList.contains('panel-open')
+                    : id === 'keyboard'
+                      ? !elements.keyboardPanel.classList.contains('hidden')
+                      : id === 'controls'
+                        ? elements.controlsPanel.classList.contains('panel-open')
+                        : elements.settingsPanel.classList.contains('panel-open');
+                  const destinationToggles = {};
+                  for (const id of ['windows', 'keyboard', 'controls', 'settings']) {
+                    openDestination('viewer');
+                    const tapDestination = () => elements.mobileNav.querySelector(`[data-bottom-action="${id}"]`).click();
+                    tapDestination();
+                    const shown = state.currentDestination === id && panelVisible(id)
+                      && elements.mobileNav.querySelector(`[data-bottom-action="${id}"]`).getAttribute('aria-pressed') === 'true';
+                    if (id === 'keyboard') elements.textInput.focus();
+                    state.pointerDown = true;
+                    state.pointerId = 900;
+                    state.activePointers.set(900, { x: 20, y: 20 });
+                    tapDestination();
+                    const hidden = state.currentDestination === 'viewer'
+                      && !elements.windowDrawer.classList.contains('panel-open')
+                      && !elements.controlsPanel.classList.contains('panel-open')
+                      && !elements.settingsPanel.classList.contains('panel-open')
+                      && elements.keyboardPanel.classList.contains('hidden')
+                      && state.pointerDown === false
+                      && state.activePointers.size === 0
+                      && state.pendingTap === null
+                      && (id !== 'keyboard' || document.activeElement !== elements.textInput);
+                    tapDestination();
+                    const shownAgain = state.currentDestination === id && panelVisible(id);
+                    tapDestination();
+                    destinationToggles[id] = { shown, hidden, shownAgain };
+                  }
+                  const cameraAfterDestinationToggles = { scale: state.cameraScale, focus: { ...state.cameraFocus } };
+                  const selectedAfterDestinationToggles = state.selectedWindow?.hwnd;
+
+                  saveBottomNavConfig([]);
+                  const mandatoryOnly = Array.from(elements.mobileNav.querySelectorAll('[data-bottom-action]')).map(button => ({
+                    id: button.dataset.bottomAction,
+                    disabled: button.disabled,
+                  }));
+                  const mandatoryEditorLocked = Array.from(elements.bottomNavEditor.querySelectorAll('.mandatory button')).every(button => button.disabled);
+
+                  saveBottomNavConfig(['rightClick', 'gestureHelp']);
+                  elements.bottomNavAdd.value = 'doubleClick';
+                  elements.bottomNavAddButton.click();
+                  elements.bottomNavEditor.querySelector('[data-shortcut-id="rightClick"][data-nav-editor-action="down"]').click();
+                  const reordered = [...state.bottomNavOptional];
+                  const customOverflow = {
+                    nav: elements.mobileNav.scrollWidth - elements.mobileNav.clientWidth,
+                    editor: elements.bottomNavEditor.scrollWidth - elements.bottomNavEditor.clientWidth,
+                  };
+                  elements.mobileNav.querySelector('[data-bottom-action="rightClick"]').click();
+                  const rightClickArmed = state.tapMode === 'right'
+                    && elements.mobileNav.querySelector('[data-bottom-action="rightClick"]').getAttribute('aria-pressed') === 'true';
+                  elements.mobileNav.querySelector('[data-bottom-action="rightClick"]').click();
+                  const rightClickDisarmed = state.tapMode === 'left'
+                    && elements.mobileNav.querySelector('[data-bottom-action="rightClick"]').getAttribute('aria-pressed') === 'false';
+                  elements.mobileNav.querySelector('[data-bottom-action="doubleClick"]').click();
+                  const doubleClickArmed = state.tapMode === 'double'
+                    && elements.mobileNav.querySelector('[data-bottom-action="doubleClick"]').getAttribute('aria-pressed') === 'true';
+                  elements.mobileNav.querySelector('[data-bottom-action="doubleClick"]').click();
+                  const doubleClickDisarmed = state.tapMode === 'left'
+                    && elements.mobileNav.querySelector('[data-bottom-action="doubleClick"]').getAttribute('aria-pressed') === 'false';
+                  elements.mobileNav.querySelector('[data-bottom-action="gestureHelp"]').click();
+                  const gestureShown = elements.gestureHelp.open;
+                  await executeBottomNavAction('gestureHelp');
+                  const gestureHidden = !elements.gestureHelp.open;
+                  await executeBottomNavAction('gestureHelp');
+                  const gestureShownAgain = elements.gestureHelp.open;
+                  await executeBottomNavAction('gestureHelp');
+                  state.bottomNavOptional = [];
+                  loadBottomNavConfig();
+                  const persisted = [...state.bottomNavOptional];
+
+                  localStorage.setItem(BOTTOM_NAV_STORAGE_KEY, JSON.stringify(['rightClick','bogus','rightClick','controls','doubleClick','fit','power']));
+                  loadBottomNavConfig();
+                  const sanitized = [...state.bottomNavOptional];
+                  const storedSanitized = JSON.parse(localStorage.getItem(BOTTOM_NAV_STORAGE_KEY));
+
+                  saveBottomNavConfig(['power']);
+                  elements.mobileNav.querySelector('[data-bottom-action="power"]').click();
+                  await new Promise(resolve => requestAnimationFrame(resolve));
+                  const power = {
+                    shown: state.currentDestination === 'settings'
+                      && elements.settingsPowerToggle.getAttribute('aria-expanded') === 'true'
+                      && !elements.settingsPowerMenu.classList.contains('hidden'),
+                    powerRequests: apiCalls.filter(path => path === '/api/system/power').length,
+                  };
+                  elements.mobileNav.querySelector('[data-bottom-action="power"]').click();
+                  power.hidden = state.currentDestination === 'viewer'
+                    && elements.settingsPowerToggle.getAttribute('aria-expanded') === 'false'
+                    && elements.settingsPowerMenu.classList.contains('hidden')
+                    && !elements.settingsPanel.classList.contains('panel-open');
+                  elements.mobileNav.querySelector('[data-bottom-action="power"]').click();
+                  power.shownAgain = state.currentDestination === 'settings'
+                    && elements.settingsPowerToggle.getAttribute('aria-expanded') === 'true'
+                    && !elements.settingsPowerMenu.classList.contains('hidden');
+                  elements.mobileNav.querySelector('[data-bottom-action="power"]').click();
+                  const navOverflow = elements.mobileNav.scrollWidth - elements.mobileNav.clientWidth;
+                  elements.bottomNavReset.click();
+                  const reset = [...state.bottomNavOptional];
+                  const storedReset = JSON.parse(localStorage.getItem(BOTTOM_NAV_STORAGE_KEY));
+
+                  apiFetch = realApiFetch;
+                  refreshStream = realRefreshStream;
+                  elements.app.requestFullscreen = realRequestFullscreen;
+                  state.selectedWindow = null;
+                  state.defaultDesktopHandled = false;
+                  state.windows = [];
+                  resetViewer();
+                  return { defaults, defaultDesktop, defaultDesktopOnce, desktopSelection, desktopRestore, cameraBeforeToggles, unavailableMessage, destinationToggles, cameraAfterDestinationToggles, selectedAfterDestinationToggles, mandatoryOnly, mandatoryEditorLocked, reordered, customOverflow, rightClickArmed, rightClickDisarmed, doubleClickArmed, doubleClickDisarmed, gestureShown, gestureHidden, gestureShownAgain, persisted, sanitized, storedSanitized, power, navOverflow, reset, storedReset };
+                })()""",
+                await_promise=True,
+            )
+            assert nav_report["defaults"] == ["desktop", "windows", "keyboard", "controls", "settings"], nav_report
+            assert nav_report["defaultDesktop"] == {
+                "selected": True,
+                "hwnd": -1,
+                "handled": True,
+                "destination": "viewer",
+                "activateCalls": 1,
+            }, nav_report
+            assert nav_report["defaultDesktopOnce"] == {"stayedEmpty": True, "activateCalls": 1}, nav_report
+            assert nav_report["desktopSelection"] == {
+                "selected": True,
+                "hwnd": -1,
+                "destination": "viewer",
+                "activateCalls": 1,
+                "fullscreenApiCalls": 0,
+                "active": True,
+            }, nav_report
+            assert nav_report["desktopRestore"] == {
+                "hwnd": 777,
+                "destination": "viewer",
+                "appActivateCalls": 1,
+                "active": False,
+                "camera": nav_report["cameraBeforeToggles"],
+            }, nav_report
+            assert "Full screen is unavailable" in nav_report["unavailableMessage"], nav_report
+            assert all(value == {"shown": True, "hidden": True, "shownAgain": True} for value in nav_report["destinationToggles"].values()), nav_report
+            assert nav_report["cameraAfterDestinationToggles"] == nav_report["cameraBeforeToggles"], nav_report
+            assert nav_report["selectedAfterDestinationToggles"] == 777, nav_report
+            assert nav_report["mandatoryOnly"] == [
+                {"id": "controls", "disabled": False},
+                {"id": "settings", "disabled": False},
+            ], nav_report
+            assert nav_report["mandatoryEditorLocked"], nav_report
+            assert nav_report["reordered"] == ["gestureHelp", "rightClick", "doubleClick"], nav_report
+            assert nav_report["customOverflow"]["nav"] <= 1 and nav_report["customOverflow"]["editor"] <= 1, nav_report
+            assert nav_report["rightClickArmed"], nav_report
+            assert nav_report["rightClickDisarmed"], nav_report
+            assert nav_report["doubleClickArmed"], nav_report
+            assert nav_report["doubleClickDisarmed"], nav_report
+            assert nav_report["gestureShown"] and nav_report["gestureHidden"] and nav_report["gestureShownAgain"], nav_report
+            assert nav_report["persisted"] == nav_report["reordered"], nav_report
+            assert nav_report["sanitized"] == ["rightClick", "doubleClick", "fit"], nav_report
+            assert nav_report["storedSanitized"] == nav_report["sanitized"], nav_report
+            assert nav_report["power"] == {
+                "shown": True,
+                "powerRequests": 0,
+                "hidden": True,
+                "shownAgain": True,
+            }, nav_report
+            assert nav_report["navOverflow"] <= 1, nav_report
+            assert nav_report["reset"] == ["desktop", "windows", "keyboard"] and nav_report["storedReset"] == nav_report["reset"], nav_report
+
             gesture_report = browser.evaluate(
                 """(async () => {
                   const calls = [];
@@ -379,7 +628,90 @@ def main() -> None:
 
                   e('pointerdown', 10, 120, 220);
                   e('pointerup', 10, 120, 220);
-                  const tapActions = calls.splice(0).map(item => item.action);
+                  const singleTapImmediateActions = calls.splice(0).map(item => item.action);
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
+                  const singleTapActions = calls.splice(0).map(item => item.action);
+
+                  e('pointerdown', 61, 120, 220);
+                  e('pointerup', 61, 120, 220);
+                  e('pointerdown', 62, 126, 225);
+                  e('pointerup', 62, 126, 225);
+                  const doubleTapActions = calls.splice(0).map(item => item.action);
+                  const doubleTapStatus = elements.gestureStatus.textContent;
+                  const doubleTapHaptic = haptics.at(-1);
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
+                  const doubleTapDelayedActions = calls.splice(0).map(item => item.action);
+
+                  e('pointerdown', 63, 120, 220);
+                  e('pointerup', 63, 120, 220);
+                  e('pointerdown', 64, 220, 320);
+                  e('pointerup', 64, 220, 320);
+                  const farTapImmediateActions = calls.splice(0).map(item => item.action);
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
+                  const farTapDelayedActions = calls.splice(0).map(item => item.action);
+
+                  e('pointerdown', 65, 120, 220);
+                  e('pointerup', 65, 120, 220);
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
+                  e('pointerdown', 66, 124, 224);
+                  e('pointerup', 66, 124, 224);
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
+                  const lateTapActions = calls.splice(0).map(item => item.action);
+
+                  e('pointerdown', 67, 120, 220);
+                  e('pointerup', 67, 120, 220);
+                  e('pointerdown', 68, 120, 220);
+                  e('pointermove', 68, 180, 270);
+                  e('pointerup', 68, 180, 270);
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
+                  const pendingTapCanceledByDragActions = calls.splice(0).map(item => item.action);
+
+                  setTapMode('double');
+                  e('pointerdown', 69, 120, 220);
+                  e('pointerup', 69, 120, 220);
+                  const explicitDoubleActions = calls.splice(0).map(item => item.action);
+                  const explicitDoubleModeAfterTap = state.tapMode;
+
+                  const cancellationActions = {};
+                  e('pointerdown', 70, 120, 220);
+                  e('pointerup', 70, 120, 220);
+                  openDestination('controls');
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
+                  cancellationActions.navigation = calls.splice(0).map(item => item.action);
+                  openDestination('viewer');
+
+                  e('pointerdown', 71, 120, 220);
+                  e('pointerup', 71, 120, 220);
+                  setControlMode('trackpad');
+                  setControlMode('touch');
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
+                  cancellationActions.modeChange = calls.splice(0).map(item => item.action);
+
+                  e('pointerdown', 72, 120, 220);
+                  e('pointerup', 72, 120, 220);
+                  updateSelectedWindow({ hwnd: 2 });
+                  updateSelectedWindow({ hwnd: 1 });
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
+                  cancellationActions.windowChange = calls.splice(0).map(item => item.action);
+
+                  e('pointerdown', 73, 120, 220);
+                  e('pointerup', 73, 120, 220);
+                  window.dispatchEvent(new Event('blur'));
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
+                  cancellationActions.blur = calls.splice(0).map(item => item.action);
+
+                  e('pointerdown', 74, 120, 220);
+                  e('pointerup', 74, 120, 220);
+                  e('pointerdown', 75, 120, 220);
+                  e('pointercancel', 75, 120, 220);
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
+                  cancellationActions.pointerCancel = calls.splice(0).map(item => item.action);
+
+                  e('pointerdown', 76, 120, 220);
+                  e('pointerup', 76, 120, 220);
+                  window.dispatchEvent(new Event('pagehide'));
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
+                  cancellationActions.pagehide = calls.splice(0).map(item => item.action);
 
                   setCameraScale(2);
                   const panStartFocus = { ...state.cameraFocus };
@@ -409,12 +741,14 @@ def main() -> None:
                   e('pointermove', 2, 180, 160);
                   const prematureMode = state.twoFingerGesture?.mode ?? null;
                   e('pointerup', 2, 180, 160);
+                  e('pointerup', 1, 100, 160);
                   const prematureActions = calls.splice(0).map(item => item.action);
 
                   e('pointerdown', 21, 100, 200);
                   e('pointerdown', 22, 180, 200);
                   e('pointerup', 22, 180, 200);
                   await new Promise(resolve => setTimeout(resolve, TWO_FINGER_SCROLL_HOLD_MS + 30));
+                  e('pointerup', 21, 100, 200);
                   const earlyReleaseActions = calls.splice(0).map(item => item.action);
 
                   e('pointerdown', 31, 100, 200);
@@ -426,21 +760,19 @@ def main() -> None:
                   const readyStatus = elements.gestureStatus.textContent;
                   const readyHaptic = haptics.at(-1);
                   e('pointermove', 31, 103, 162);
-                  e('pointermove', 32, 183, 162);
                   const scrollModeAfterDrag = state.twoFingerGesture?.mode ?? null;
                   const scrollScaleBeforeSeparation = state.cameraScale;
                   e('pointermove', 31, 63, 162);
                   const scrollModeAfterSeparation = state.twoFingerGesture?.mode ?? null;
                   const scrollScaleAfterSeparation = state.cameraScale;
-                  e('pointerup', 32, 183, 162);
+                  e('pointerup', 32, 183, 202);
                   const scrollActions = calls.splice(0).map(item => item.action);
 
                   e('pointerdown', 51, 100, 200);
                   e('pointerdown', 52, 180, 200);
                   await new Promise(resolve => setTimeout(resolve, TWO_FINGER_SCROLL_HOLD_MS + 30));
                   e('pointermove', 51, 100, 160);
-                  e('pointermove', 52, 180, 160);
-                  e('pointercancel', 52, 180, 160);
+                  e('pointercancel', 52, 180, 200);
                   const scrollCancelActions = calls.splice(0).map(item => item.action);
                   const scrollCancelState = { gesture: state.twoFingerGesture, active: state.activePointers.size };
 
@@ -459,12 +791,24 @@ def main() -> None:
                   e('pointerdown', 41, 100, 200);
                   e('pointerdown', 42, 180, 200);
                   e('pointerup', 42, 180, 200);
+                  e('pointerup', 41, 100, 200);
                   const twoFingerTapActions = calls.splice(0).map(item => item.action);
+                  const twoFingerTapStatus = elements.gestureStatus.textContent;
+                  const twoFingerTapHaptic = haptics.at(-1);
+
+                  e('pointerdown', 81, 100, 200);
+                  e('pointerdown', 82, 180, 200);
+                  await new Promise(resolve => setTimeout(resolve, TWO_FINGER_TAP_MAX_MS + 30));
+                  e('pointerup', 82, 180, 200);
+                  e('pointerup', 81, 100, 200);
+                  const heldTwoFingerTapActions = calls.splice(0).map(item => item.action);
 
                   e('pointerdown', 5, 120, 220);
-                  await new Promise(resolve => setTimeout(resolve, LONG_PRESS_DURATION_MS + 40));
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 300));
+                  const heldFingerActions = calls.splice(0).map(item => item.action);
                   e('pointerup', 5, 120, 220);
-                  const longPressActions = calls.splice(0).map(item => item.action);
+                  await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
+                  const heldThenReleasedActions = calls.splice(0).map(item => item.action);
 
                   e('pointerdown', 6, 120, 220);
                   e('pointermove', 6, 150, 250);
@@ -478,7 +822,7 @@ def main() -> None:
                   haptic = realHaptic;
                   state.selectedWindow = null;
                   resetViewer();
-                  return { freshControls, legacyControls, savedControls, trackpadActions, touchModeStored, tapActions, panActions, panStartFocus, panEndFocus, boundedPanActions, boundedPanFocus, scaleOneActions, scaleOneFocus, scaleOneEndFocus, prematureMode, prematureActions, earlyReleaseActions, jitterArmed, readyStatus, readyHaptic, scrollActions, scrollModeAfterDrag, scrollModeAfterSeparation, scrollScaleBeforeSeparation, scrollScaleAfterSeparation, scrollCancelActions, scrollCancelState, pinchActions, pinchScale, pinchModeAfterSeparation, pinchModeAfterParallel, twoFingerTapActions, longPressActions, cancelActions, diagnosticEvents, diagnosticStates, diagnosticPointerTypes };
+                  return { freshControls, legacyControls, savedControls, trackpadActions, touchModeStored, singleTapImmediateActions, singleTapActions, doubleTapActions, doubleTapStatus, doubleTapHaptic, doubleTapDelayedActions, farTapImmediateActions, farTapDelayedActions, lateTapActions, pendingTapCanceledByDragActions, explicitDoubleActions, explicitDoubleModeAfterTap, cancellationActions, panActions, panStartFocus, panEndFocus, boundedPanActions, boundedPanFocus, scaleOneActions, scaleOneFocus, scaleOneEndFocus, prematureMode, prematureActions, earlyReleaseActions, jitterArmed, readyStatus, readyHaptic, scrollActions, scrollModeAfterDrag, scrollModeAfterSeparation, scrollScaleBeforeSeparation, scrollScaleAfterSeparation, scrollCancelActions, scrollCancelState, pinchActions, pinchScale, pinchModeAfterSeparation, pinchModeAfterParallel, twoFingerTapActions, twoFingerTapStatus, twoFingerTapHaptic, heldTwoFingerTapActions, heldFingerActions, heldThenReleasedActions, cancelActions, diagnosticEvents, diagnosticStates, diagnosticPointerTypes };
                 })()""",
                 await_promise=True,
             )
@@ -487,7 +831,19 @@ def main() -> None:
             assert gesture_report["savedControls"] == {"state": "trackpad", "stored": "trackpad", "select": "trackpad", "mouseSpeed": 3.4, "mouseSpeedInput": "3.4", "followMouse": True, "followMouseInput": True}, gesture_report
             assert gesture_report["trackpadActions"] == ["move_relative"], gesture_report
             assert gesture_report["touchModeStored"] == "touch", gesture_report
-            assert gesture_report["tapActions"] == ["touch_tap"], gesture_report
+            assert gesture_report["singleTapImmediateActions"] == [], gesture_report
+            assert gesture_report["singleTapActions"] == ["touch_tap"], gesture_report
+            assert gesture_report["doubleTapActions"] == ["touch_hold"], gesture_report
+            assert gesture_report["doubleTapDelayedActions"] == [], gesture_report
+            assert gesture_report["doubleTapStatus"] == "Right-click", gesture_report
+            assert gesture_report["doubleTapHaptic"] == [18, 35, 18], gesture_report
+            assert gesture_report["farTapImmediateActions"] == ["touch_tap"], gesture_report
+            assert gesture_report["farTapDelayedActions"] == ["touch_tap"], gesture_report
+            assert gesture_report["lateTapActions"] == ["touch_tap", "touch_tap"], gesture_report
+            assert gesture_report["pendingTapCanceledByDragActions"] == [], gesture_report
+            assert gesture_report["explicitDoubleActions"] == ["touch_double"], gesture_report
+            assert gesture_report["explicitDoubleModeAfterTap"] == "left", gesture_report
+            assert all(actions == [] for actions in gesture_report["cancellationActions"].values()), gesture_report
             assert gesture_report["panActions"] == [], gesture_report
             assert gesture_report["panEndFocus"]["x"] < gesture_report["panStartFocus"]["x"], gesture_report
             assert gesture_report["panEndFocus"]["y"] < gesture_report["panStartFocus"]["y"], gesture_report
@@ -507,8 +863,12 @@ def main() -> None:
             assert gesture_report["scrollCancelState"] == {"gesture": None, "active": 0}, gesture_report
             assert gesture_report["pinchModeAfterSeparation"] == "pinch" and gesture_report["pinchModeAfterParallel"] == "pinch", gesture_report
             assert gesture_report["pinchActions"] == [] and gesture_report["pinchScale"] > 1, gesture_report
-            assert gesture_report["twoFingerTapActions"] == [], gesture_report
-            assert gesture_report["longPressActions"] == ["touch_hold"], gesture_report
+            assert gesture_report["twoFingerTapActions"] == ["touch_double"], gesture_report
+            assert gesture_report["twoFingerTapStatus"] == "Double-click", gesture_report
+            assert gesture_report["twoFingerTapHaptic"] == [16, 30, 16], gesture_report
+            assert gesture_report["heldTwoFingerTapActions"] == [], gesture_report
+            assert gesture_report["heldFingerActions"] == [], gesture_report
+            assert gesture_report["heldThenReleasedActions"] == ["touch_tap"], gesture_report
             assert gesture_report["cancelActions"] == [], gesture_report
             assert "gesture-classified" in gesture_report["diagnosticEvents"], gesture_report
             assert "two-finger-scroll:armed" in gesture_report["diagnosticStates"] and "two-finger-scroll:disarmed" in gesture_report["diagnosticStates"], gesture_report

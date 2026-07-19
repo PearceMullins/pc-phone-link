@@ -8,11 +8,14 @@ const state = {
   connectInfoPollAttempts: 0,
   pairingPollTimer: null,
   selectedWindow: null,
+  previousNonDesktopWindow: null,
+  defaultDesktopHandled: false,
   windows: [],
   mouseSpeed: 2.5,
   tapMode: "left",
   controlMode: "touch",
   controlsHidden: false,
+  bottomNavOptional: [],
   currentDestination: "viewer",
   recentWindowKeys: [],
   fitShape: "auto",
@@ -53,8 +56,7 @@ const state = {
   followMouse: false,
   activePointers: new Map(),
   twoFingerGesture: null,
-  longPressTimer: null,
-  longPressTriggered: false,
+  pendingTap: null,
   gestureStatusTimer: null,
   suppressPrimaryTapUp: false,
   installPrompt: null,
@@ -99,6 +101,7 @@ const ACCESS_TOKEN_STORAGE_KEY = "pc-phone-link-token";
 const PAIRING_DEVICE_NAME_STORAGE_KEY = "pc-phone-link-pairing-device-name";
 const FIT_SHAPE_STORAGE_KEY = "pc-phone-link-fit-shape";
 const CONTROL_MODE_STORAGE_KEY = "pc-phone-link-control-mode";
+const BOTTOM_NAV_STORAGE_KEY = "pc-phone-link-bottom-nav";
 const GESTURE_DIAGNOSTICS_STORAGE_KEY = "pc-phone-link-gesture-diagnostics";
 const RECENT_WINDOWS_STORAGE_KEY = "pc-phone-link-recent-windows";
 const STREAM_FPS_STORAGE_KEY = "pc-phone-link-stream-fps";
@@ -111,11 +114,14 @@ const MAX_VISIBLE_MESSAGE_HISTORY = 12;
 const KEYBOARD_VISIBLE_HEIGHT_DELTA = 140;
 const KEYBOARD_VISIBLE_HEIGHT_RATIO = 0.18;
 const DIRECT_TOUCH_DRAG_THRESHOLD = 7;
-const LONG_PRESS_DURATION_MS = 560;
+const DOUBLE_TAP_DELAY_MS = 320;
+const DOUBLE_TAP_DISTANCE_PX = 28;
 const TWO_FINGER_PINCH_THRESHOLD = 12;
 const TWO_FINGER_SCROLL_HOLD_MS = 360;
 const TWO_FINGER_HOLD_SLOP = 10;
 const TWO_FINGER_SCROLL_START_THRESHOLD = 6;
+const TWO_FINGER_TAP_MAX_MS = 260;
+const TWO_FINGER_TAP_SLOP = 12;
 const MAX_CAMERA_SCALE = 6;
 const MAX_STREAM_FPS = 30;
 const DEFAULT_STREAM_FPS = 20;
@@ -128,6 +134,22 @@ const STREAM_RECONNECT_DELAY_MS = 600;
 const AUTH_REQUIRED_MESSAGE = "Connect your phone to use PC Phone Link.";
 const AUTH_REQUIRED_RECHECK_DELAY_MS = 500;
 const MOBILE_SHELL_MEDIA = "(max-width: 899px), ((hover: none) and (pointer: coarse) and (max-width: 1366px))";
+const DEFAULT_BOTTOM_NAV_OPTIONAL = ["desktop", "windows", "keyboard"];
+const MANDATORY_BOTTOM_NAV = ["controls", "settings"];
+const MAX_OPTIONAL_BOTTOM_NAV = 3;
+const BOTTOM_NAV_CATALOG = Object.freeze({
+  desktop: { label: "Full screen", icon: "▣" },
+  windows: { label: "Windows", icon: "▤" },
+  keyboard: { label: "Keyboard", icon: "⌨" },
+  gestureHelp: { label: "Gestures", icon: "?" },
+  rightClick: { label: "Right-click next tap", icon: "R" },
+  doubleClick: { label: "Double-click next tap", icon: "2×" },
+  fit: { label: "Fit", icon: "↔" },
+  power: { label: "Power", icon: "⏻" },
+  modeToggle: { label: "Input mode", icon: "◎" },
+  controls: { label: "Controls", icon: "◎", mandatory: true },
+  settings: { label: "Settings", icon: "⚙", mandatory: true },
+});
 
 const POWER_ACTIONS = {
   lock: { confirm: null, pending: "Locking the PC", done: "PC locked." },
@@ -223,6 +245,10 @@ const elements = {
   gestureDiagnostics: document.getElementById("gestureDiagnostics"),
   gestureLogPath: document.getElementById("gestureLogPath"),
   clearGestureLogs: document.getElementById("clearGestureLogs"),
+  bottomNavEditor: document.getElementById("bottomNavEditor"),
+  bottomNavAdd: document.getElementById("bottomNavAdd"),
+  bottomNavAddButton: document.getElementById("bottomNavAddButton"),
+  bottomNavReset: document.getElementById("bottomNavReset"),
   revealControls: document.getElementById("revealControls"),
   viewerShell: document.getElementById("viewerShell"),
   voiceInput: document.getElementById("voiceInput"),
@@ -236,6 +262,245 @@ function clampRatio(value) {
 
 function usesMobileShell() {
   return window.matchMedia(MOBILE_SHELL_MEDIA).matches;
+}
+
+function sanitizeBottomNavOptional(value) {
+  if (!Array.isArray(value)) return [...DEFAULT_BOTTOM_NAV_OPTIONAL];
+  const seen = new Set();
+  return value.filter((id) => {
+    if (typeof id !== "string" || seen.has(id) || MANDATORY_BOTTOM_NAV.includes(id)) return false;
+    const item = BOTTOM_NAV_CATALOG[id];
+    if (!item || item.mandatory) return false;
+    seen.add(id);
+    return true;
+  }).slice(0, MAX_OPTIONAL_BOTTOM_NAV);
+}
+
+function loadBottomNavConfig() {
+  const saved = window.localStorage.getItem(BOTTOM_NAV_STORAGE_KEY);
+  if (saved === null) {
+    state.bottomNavOptional = [...DEFAULT_BOTTOM_NAV_OPTIONAL];
+  } else {
+    try {
+      const parsed = JSON.parse(saved);
+      state.bottomNavOptional = sanitizeBottomNavOptional(parsed);
+      if (JSON.stringify(parsed) !== JSON.stringify(state.bottomNavOptional)) {
+        window.localStorage.setItem(BOTTOM_NAV_STORAGE_KEY, JSON.stringify(state.bottomNavOptional));
+      }
+    } catch {
+      state.bottomNavOptional = [...DEFAULT_BOTTOM_NAV_OPTIONAL];
+      window.localStorage.setItem(BOTTOM_NAV_STORAGE_KEY, JSON.stringify(state.bottomNavOptional));
+    }
+  }
+  renderBottomNav();
+  renderBottomNavEditor();
+}
+
+function saveBottomNavConfig(optionalItems) {
+  state.bottomNavOptional = sanitizeBottomNavOptional(optionalItems);
+  window.localStorage.setItem(BOTTOM_NAV_STORAGE_KEY, JSON.stringify(state.bottomNavOptional));
+  logGestureDiagnostic("bottom-nav-config", {
+    action: "save",
+    pointer_count: state.bottomNavOptional.length,
+    state: "updated",
+  });
+  renderBottomNav();
+  renderBottomNavEditor();
+}
+
+function bottomNavItemState(id) {
+  if (id === "desktop") return state.currentDestination === "viewer" && Boolean(state.selectedWindow?.is_desktop_capture);
+  if (["windows", "keyboard", "controls", "settings"].includes(id)) return state.currentDestination === id;
+  if (id === "rightClick") return state.tapMode === "right";
+  if (id === "doubleClick") return state.tapMode === "double";
+  if (id === "fit") return state.phoneFitEnabled;
+  if (id === "power") return state.currentDestination === "settings" && elements.settingsPowerToggle?.getAttribute("aria-expanded") === "true";
+  if (id === "gestureHelp") return Boolean(elements.gestureHelp?.open);
+  return false;
+}
+
+function bottomNavLabel(id) {
+  if (id === "modeToggle") return state.controlMode === "touch" ? "App touch" : "Mouse trackpad";
+  return BOTTOM_NAV_CATALOG[id]?.label || id;
+}
+
+function renderBottomNav() {
+  if (!elements.mobileNav) return;
+  const ids = [...sanitizeBottomNavOptional(state.bottomNavOptional), ...MANDATORY_BOTTOM_NAV];
+  elements.mobileNav.replaceChildren();
+  elements.mobileNav.style.setProperty("--nav-count", String(ids.length));
+  for (const id of ids) {
+    const item = BOTTOM_NAV_CATALOG[id];
+    if (!item) continue;
+    const label = bottomNavLabel(id);
+    const active = bottomNavItemState(id);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.bottomAction = id;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-label", id === "modeToggle"
+      ? `Input mode: ${label}. Tap to switch.`
+      : label);
+    button.setAttribute("aria-pressed", String(active));
+    const icon = document.createElement("span");
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = item.icon;
+    const text = document.createElement("small");
+    text.textContent = label;
+    button.append(icon, text);
+    elements.mobileNav.append(button);
+  }
+}
+
+function createBottomNavEditorRow(id, index, mandatory = false) {
+  const row = document.createElement("div");
+  row.className = "bottom-nav-editor-row";
+  row.dataset.shortcutId = id;
+  const label = document.createElement("span");
+  label.textContent = BOTTOM_NAV_CATALOG[id].label;
+  const actions = document.createElement("div");
+  actions.className = "bottom-nav-editor-actions";
+  for (const [action, text] of [["up", "Up"], ["down", "Down"], ["remove", "Remove"]]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ghost-button compact-button";
+    button.dataset.navEditorAction = action;
+    button.dataset.shortcutId = id;
+    button.textContent = text;
+    button.disabled = mandatory || (action === "up" && index === 0)
+      || (action === "down" && index === state.bottomNavOptional.length - 1);
+    button.setAttribute("aria-label", `${text} ${BOTTOM_NAV_CATALOG[id].label}`);
+    actions.append(button);
+  }
+  if (mandatory) {
+    row.classList.add("mandatory");
+    label.textContent += " (always shown)";
+  }
+  row.append(label, actions);
+  return row;
+}
+
+function renderBottomNavEditor() {
+  if (!elements.bottomNavEditor || !elements.bottomNavAdd) return;
+  elements.bottomNavEditor.replaceChildren();
+  state.bottomNavOptional.forEach((id, index) => {
+    elements.bottomNavEditor.append(createBottomNavEditorRow(id, index));
+  });
+  MANDATORY_BOTTOM_NAV.forEach((id) => {
+    elements.bottomNavEditor.append(createBottomNavEditorRow(id, -1, true));
+  });
+  elements.bottomNavAdd.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = state.bottomNavOptional.length >= MAX_OPTIONAL_BOTTOM_NAV
+    ? "Remove a shortcut to add another"
+    : "Choose shortcut";
+  elements.bottomNavAdd.append(placeholder);
+  Object.entries(BOTTOM_NAV_CATALOG).forEach(([id, item]) => {
+    if (item.mandatory || state.bottomNavOptional.includes(id)) return;
+    const option = document.createElement("option");
+    option.value = id;
+    option.textContent = item.label;
+    elements.bottomNavAdd.append(option);
+  });
+  const atLimit = state.bottomNavOptional.length >= MAX_OPTIONAL_BOTTOM_NAV;
+  elements.bottomNavAdd.disabled = atLimit;
+  if (elements.bottomNavAddButton) elements.bottomNavAddButton.disabled = atLimit;
+}
+
+async function selectDesktopCapture() {
+  if (state.currentDestination === "viewer" && state.selectedWindow?.is_desktop_capture) {
+    let previous = state.previousNonDesktopWindow;
+    state.previousNonDesktopWindow = null;
+    if (previous) {
+      const current = state.windows.find((windowInfo) => windowInfo.hwnd === previous.hwnd);
+      previous = current || previous;
+      try {
+        await selectWindow(previous);
+        logGestureDiagnostic("bottom-nav-action", { action: "desktop", result: "restored" });
+        return;
+      } catch {
+        // Previous app may have closed while desktop capture was active.
+      }
+    }
+    state.selectedWindow = null;
+    resetViewer();
+    openDestination("viewer");
+    showToast("Full screen closed. Open Windows to choose an app.");
+    logGestureDiagnostic("bottom-nav-action", { action: "desktop", result: "closed" });
+    return;
+  }
+  if (state.selectedWindow && !state.selectedWindow.is_desktop_capture) {
+    state.previousNonDesktopWindow = state.selectedWindow;
+  } else {
+    state.previousNonDesktopWindow = null;
+  }
+  let target = state.windows.find((windowInfo) => windowInfo.is_desktop_capture);
+  if (!target) {
+    try {
+      await refreshWindows();
+    } catch (error) {
+      showToast(`Could not refresh Windows. ${error.message || "Try again."}`);
+      return;
+    }
+    target = state.windows.find((windowInfo) => windowInfo.is_desktop_capture);
+  }
+  if (!target) {
+    showToast("Full screen is unavailable. Open Windows, tap Refresh, then try again.");
+    logGestureDiagnostic("bottom-nav-action", { action: "desktop", result: "unavailable" });
+    return;
+  }
+  logGestureDiagnostic("bottom-nav-action", { action: "desktop", result: "selected" });
+  await selectWindow(target);
+}
+
+async function maybeSelectDefaultDesktopCapture() {
+  if (state.selectedWindow || state.defaultDesktopHandled) return;
+  const target = state.windows.find((windowInfo) => windowInfo.is_desktop_capture);
+  if (!target) return;
+  state.defaultDesktopHandled = true;
+  try {
+    await selectWindow(target);
+    logGestureDiagnostic("bottom-nav-action", { action: "desktop", result: "default" }, { immediate: true });
+  } catch {
+    state.defaultDesktopHandled = false;
+  }
+}
+
+async function executeBottomNavAction(id) {
+  logGestureDiagnostic("bottom-nav-action", { action: id, state: "invoked" });
+  if (id === "desktop") return selectDesktopCapture();
+  if (["windows", "keyboard", "controls", "settings"].includes(id)) {
+    openDestination(id, { toggle: true });
+    return;
+  }
+  if (id === "gestureHelp") {
+    if (elements.gestureHelp?.open) elements.gestureHelp.close();
+    else elements.gestureHelp?.showModal();
+    renderBottomNav();
+  } else if (id === "rightClick") {
+    setTapMode(state.tapMode === "right" ? "left" : "right");
+    showGestureStatus(state.tapMode === "right" ? "Right-click armed" : "Right-click canceled");
+  } else if (id === "doubleClick") {
+    setTapMode(state.tapMode === "double" ? "left" : "double");
+    showGestureStatus(state.tapMode === "double" ? "Double-click armed" : "Double-click canceled");
+  } else if (id === "fit") {
+    await handleFitToggle();
+  } else if (id === "power") {
+    const powerOpen = state.currentDestination === "settings"
+      && elements.settingsPowerToggle?.getAttribute("aria-expanded") === "true";
+    if (powerOpen) {
+      closePowerMenus();
+      openDestination("viewer");
+    } else {
+      openDestination("settings");
+      togglePowerMenu(true, "settings");
+    }
+  } else if (id === "modeToggle") {
+    setControlMode(state.controlMode === "touch" ? "trackpad" : "touch");
+    showGestureStatus(bottomNavLabel(id));
+  }
+  renderBottomNav();
 }
 
 function getViewportSize() {
@@ -323,7 +588,7 @@ function syncControlMode() {
   }
   if (elements.controlModeHelp) {
     elements.controlModeHelp.textContent = state.controlMode === "touch"
-      ? "Tap to click, one finger to pan viewer, hold two fingers until Scroll ready then drag to scroll, pinch to zoom, long press to right-click."
+      ? "Tap to click, double-tap to right-click, quick two-finger tap to double-click, one finger to pan viewer, hold two fingers until Scroll ready then hold one finger and drag the other to scroll, and pinch to zoom."
       : "Drag to move PC mouse, tap to click, and use controls below for scrolling and right-click.";
   }
   elements.viewerShell.classList.toggle("direct-touch-active", state.controlMode === "touch");
@@ -331,12 +596,14 @@ function syncControlMode() {
 
 function setControlMode(value) {
   const nextMode = value === "trackpad" ? "trackpad" : "touch";
+  if (nextMode !== state.controlMode) cancelPendingTap("mode-change");
   if (nextMode !== state.controlMode && (state.pointerDown || state.activePointers.size)) {
     releaseActiveTouches();
   }
   state.controlMode = nextMode;
   window.localStorage.setItem(CONTROL_MODE_STORAGE_KEY, state.controlMode);
   syncControlMode();
+  renderBottomNav();
 }
 
 function clampStreamFps(value) {
@@ -951,6 +1218,7 @@ function loadViewerPreferences() {
   syncStreamFpsControl();
   syncStreamWidthControl();
   syncTextScaleControl();
+  loadBottomNavConfig();
 }
 
 function updateMouseSpeedLabel() {
@@ -1454,6 +1722,7 @@ async function bootstrap({ quiet = false } = {}) {
     }
     elements.authPanel.classList.add("hidden");
     await refreshWindows();
+    await maybeSelectDefaultDesktopCapture();
     void refreshTrustedDevices({ quiet: true });
     scheduleWindowRefresh();
     clearHostReconnectPolling();
@@ -1715,6 +1984,7 @@ function updateSelectedWindow(windowInfo) {
   }
 
   if (!state.selectedWindow || state.selectedWindow.hwnd !== windowInfo.hwnd) {
+    cancelPendingTap("selected-window-change");
     state.typingAnchor = null;
   }
   state.selectedWindow = windowInfo;
@@ -1733,6 +2003,7 @@ function syncPhoneFitButton() {
   elements.fitToggle.classList.toggle("mode-active", state.phoneFitEnabled);
   elements.fitToggle.textContent = state.phoneFitEnabled ? "Maximize" : "Fit";
   elements.viewerShell.classList.toggle("phone-fit-active", state.phoneFitEnabled);
+  renderBottomNav();
 }
 
 function syncTargetActionButtons() {
@@ -2055,6 +2326,7 @@ function startMjpegFallback(params) {
 }
 
 function resetViewer() {
+  cancelPendingTap("viewer-reset");
   if (state.pointerDown || state.activePointers.size) releaseActiveTouches();
   closeStreamSocket();
   releaseStreamObjectUrl();
@@ -2105,6 +2377,7 @@ function toggleControls() {
 }
 
 function setTapMode(mode) {
+  if (mode !== "left") cancelPendingTap("explicit-tap-mode");
   state.tapMode = mode;
   if (elements.rightClickMode) {
     elements.rightClickMode.classList.toggle("mode-active", mode === "right");
@@ -2112,6 +2385,7 @@ function setTapMode(mode) {
   if (elements.doubleClickMode) {
     elements.doubleClickMode.classList.toggle("mode-active", mode === "double");
   }
+  renderBottomNav();
 }
 
 function openKeyboardCapture({ focusInput = true } = {}) {
@@ -2522,7 +2796,7 @@ function sendPointer(action, payload = {}) {
     delta_y: payload.deltaY || 0,
     request_id: requestId,
     session_id: state.gestureSessionId,
-    gesture_id: state.currentGestureId || diagnosticId("gesture"),
+    gesture_id: payload.gestureId || state.currentGestureId || diagnosticId("gesture"),
     control_mode: state.controlMode,
     pointer_count: state.activePointers.size,
     pointer_type: state.pointerType,
@@ -2573,6 +2847,7 @@ function sendPointer(action, payload = {}) {
 
 function handlePointerError(error) {
   emergencyTouchCancel("request-error");
+  cancelPendingTap("request-error");
   state.pendingTouchMovePayload = null;
   state.activePointers.clear();
   clearTwoFingerHoldTimer();
@@ -2612,25 +2887,73 @@ function showGestureStatus(label, duration = 700) {
   }, duration);
 }
 
-function clearLongPress() {
-  if (state.longPressTimer) window.clearTimeout(state.longPressTimer);
-  state.longPressTimer = null;
+function cancelPendingTap(reason) {
+  const pending = state.pendingTap;
+  if (!pending) return;
+  window.clearTimeout(pending.timer);
+  state.pendingTap = null;
+  logGestureDiagnostic("gesture-state", {
+    gesture: "double-tap",
+    state: "canceled",
+    reason,
+  });
 }
 
-function scheduleLongPress() {
-  clearLongPress();
-  if (state.controlMode !== "touch" || !state.startSourcePoint) return;
-  state.longPressTriggered = false;
-  state.longPressTimer = window.setTimeout(() => {
-    state.longPressTimer = null;
-    if (!state.pointerDown || state.dragActive || state.activePointers.size !== 1) return;
-    sendPointer("touch_hold", state.startSourcePoint);
-    logGestureDiagnostic("gesture-classified", { gesture: "long-press", state: "active" }, { immediate: true });
-    state.longPressTriggered = true;
-    state.suppressPrimaryTapUp = true;
-    haptic([18, 35, 18]);
-    showGestureStatus("Right-click");
-  }, LONG_PRESS_DURATION_MS);
+function dispatchPendingSingleTap(pending, reason) {
+  if (state.pendingTap !== pending) return;
+  window.clearTimeout(pending.timer);
+  state.pendingTap = null;
+  if (state.controlMode !== "touch" || state.selectedWindow?.hwnd !== pending.windowHwnd) {
+    logGestureDiagnostic("gesture-state", {
+      gesture: "double-tap",
+      state: "canceled",
+      reason: "target-changed",
+    });
+    return;
+  }
+  sendPointer("touch_tap", { ...pending.sourcePoint, gestureId: pending.gestureId });
+  logGestureDiagnostic("gesture-classified", {
+    gesture: "single-tap",
+    state: "active",
+    reason,
+  });
+  showGestureStatus("Tap");
+}
+
+function queueAppTouchTap(sourcePoint, clientPoint) {
+  const now = Date.now();
+  const pending = state.pendingTap;
+  if (pending) {
+    const elapsed = now - pending.completedAt;
+    const distance = getPointerDistance(pending.clientPoint, clientPoint);
+    if (elapsed <= DOUBLE_TAP_DELAY_MS && distance <= DOUBLE_TAP_DISTANCE_PX
+      && pending.windowHwnd === state.selectedWindow?.hwnd) {
+      window.clearTimeout(pending.timer);
+      state.pendingTap = null;
+      sendPointer("touch_hold", sourcePoint);
+      logGestureDiagnostic("gesture-classified", {
+        gesture: "double-tap-right-click",
+        state: "active",
+        delta: distance,
+      }, { immediate: true });
+      haptic([18, 35, 18]);
+      showGestureStatus("Right-click");
+      return;
+    }
+    dispatchPendingSingleTap(pending, elapsed > DOUBLE_TAP_DELAY_MS ? "late-second-tap" : "distant-second-tap");
+  }
+
+  const next = {
+    sourcePoint: { ...sourcePoint },
+    clientPoint: { ...clientPoint },
+    completedAt: now,
+    gestureId: state.currentGestureId,
+    windowHwnd: state.selectedWindow?.hwnd,
+    timer: null,
+  };
+  next.timer = window.setTimeout(() => dispatchPendingSingleTap(next, "double-tap-timeout"), DOUBLE_TAP_DELAY_MS);
+  state.pendingTap = next;
+  logGestureDiagnostic("gesture-state", { gesture: "double-tap", state: "candidate" });
 }
 
 function clearTwoFingerHoldTimer(gesture = state.twoFingerGesture) {
@@ -2666,20 +2989,52 @@ function scheduleTwoFingerScrollArm(gesture) {
   }, TWO_FINGER_SCROLL_HOLD_MS);
 }
 
-function finishTwoFingerGesture({ canceled = false } = {}) {
+function finishTwoFingerGesture({ canceled = false, recognizeTap = false } = {}) {
   const gesture = state.twoFingerGesture;
+  let tapRecognized = false;
   clearTwoFingerHoldTimer(gesture);
   if (gesture?.mode === "scroll" && gesture.lastSourcePoint) {
     if (state.controlMode === "touch") sendPointer(canceled ? "touch_cancel" : "touch_up", gesture.lastSourcePoint);
   }
+  if (gesture && recognizeTap && !canceled && state.controlMode === "touch"
+    && gesture.tapEligible && !gesture.mode && !gesture.scrollArmed
+    && Date.now() - gesture.startedAt <= TWO_FINGER_TAP_MAX_MS
+    && gesture.maxMovementA <= TWO_FINGER_TAP_SLOP
+    && gesture.maxMovementB <= TWO_FINGER_TAP_SLOP) {
+    const first = gesture.endA || gesture.startA;
+    const second = gesture.endB || gesture.startB;
+    const midpoint = getPointerMidpoint(first, second);
+    const sourcePoint = viewerPointToSourceNormalized(midpoint.x, midpoint.y);
+    if (sourcePoint) {
+      sendPointer("touch_double", sourcePoint);
+      tapRecognized = true;
+      haptic([16, 30, 16]);
+      showGestureStatus("Double-click");
+      logGestureDiagnostic("gesture-classified", {
+        gesture: "two-finger-double-click",
+        state: "active",
+      }, { immediate: true });
+    }
+  }
+  if (gesture && recognizeTap && !tapRecognized) {
+    const elapsed = Date.now() - gesture.startedAt;
+    const reason = elapsed > TWO_FINGER_TAP_MAX_MS
+      ? "late"
+      : Math.max(gesture.maxMovementA, gesture.maxMovementB) > TWO_FINGER_TAP_SLOP
+        ? "moved"
+        : "ineligible";
+    logGestureDiagnostic("gesture-state", {
+      gesture: "two-finger-double-click",
+      state: "rejected",
+      reason,
+    });
+  }
   if (gesture) gesture.pointerIds.forEach((pointerId) => state.activePointers.delete(pointerId));
   state.twoFingerGesture = null;
-  clearLongPress();
   resetPrimaryPointerState();
 }
 
 function resetPrimaryPointerState() {
-  clearLongPress();
   state.pointerDown = false;
   state.dragActive = false;
   state.pointerId = null;
@@ -2688,7 +3043,6 @@ function resetPrimaryPointerState() {
   state.startSourcePoint = null;
   state.lastSourcePoint = null;
   state.directTouchDownSent = false;
-  state.longPressTriggered = false;
   state.suppressPrimaryTapUp = false;
   if (!state.activePointers.size) state.currentGestureId = "";
 }
@@ -2737,10 +3091,17 @@ function handlePointerDown(event) {
     }
 
     event.preventDefault();
-    clearLongPress();
+    cancelPendingTap("two-finger-gesture");
     elements.touchLayer.setPointerCapture(event.pointerId);
 
-    if (state.activePointers.size > 2) return;
+    if (state.activePointers.size > 2) {
+      if (state.twoFingerGesture) {
+        state.twoFingerGesture.tapEligible = false;
+        state.twoFingerGesture.holdEligible = false;
+        clearTwoFingerHoldTimer(state.twoFingerGesture);
+      }
+      return;
+    }
 
     const primaryId = state.pointerId !== null && state.activePointers.has(state.pointerId)
       ? state.pointerId
@@ -2751,11 +3112,19 @@ function handlePointerDown(event) {
       startA: { ...primaryPoint },
       startB: { x: event.clientX, y: event.clientY },
       mode: null,
+      tapEligible: true,
+      startedAt: Date.now(),
+      releasedPointerIds: new Set(),
+      endA: null,
+      endB: null,
+      maxMovementA: 0,
+      maxMovementB: 0,
       holdEligible: true,
       holdTimer: null,
       scrollArmed: false,
       armA: null,
       armB: null,
+      dragPointerId: null,
       startScale: state.cameraScale,
       startFocus: viewerPointToSourceNormalized(
         (primaryPoint.x + event.clientX) / 2,
@@ -2790,7 +3159,6 @@ function handlePointerDown(event) {
   state.lastSourcePoint = state.startSourcePoint;
   state.directTouchDownSent = false;
   elements.touchLayer.setPointerCapture(event.pointerId);
-  scheduleLongPress();
 }
 
 function handlePointerMove(event) {
@@ -2815,51 +3183,57 @@ function handlePointerMove(event) {
     const gesture = state.twoFingerGesture;
     const first = state.activePointers.get(gesture.pointerIds[0]);
     const second = state.activePointers.get(gesture.pointerIds[1]);
+    if (first) gesture.maxMovementA = Math.max(gesture.maxMovementA, getPointerDistance(gesture.startA, first));
+    if (second) gesture.maxMovementB = Math.max(gesture.maxMovementB, getPointerDistance(gesture.startB, second));
     if (!first || !second) return;
     event.preventDefault();
-    clearLongPress();
+    cancelPendingTap("two-finger-gesture");
 
     if (!gesture.mode) {
-      const pinchMode = window.PCPhoneLinkGestures.classifyTwoFingerGesture(
-        gesture.startA,
-        gesture.startB,
-        first,
-        second,
-        TWO_FINGER_PINCH_THRESHOLD,
-      );
-      if (pinchMode === "pinch") {
-        gesture.mode = "pinch";
-        clearTwoFingerHoldTimer(gesture);
-      } else if (
-        gesture.scrollArmed
-        && window.PCPhoneLinkGestures.isParallelTwoFingerDrag(
+      const holdDrag = gesture.scrollArmed
+        ? window.PCPhoneLinkGestures.isHoldAndDragScroll(
           gesture.armA,
           gesture.armB,
           first,
           second,
+          TWO_FINGER_HOLD_SLOP,
           TWO_FINGER_SCROLL_START_THRESHOLD,
         )
-      ) {
+        : { active: false, dragIndex: -1 };
+      if (holdDrag.active) {
         gesture.mode = "scroll";
+        gesture.dragPointerId = gesture.pointerIds[holdDrag.dragIndex];
       } else {
-        if (gesture.holdEligible && !gesture.scrollArmed) {
-          const motion = window.PCPhoneLinkGestures.twoFingerMotion(
-            gesture.startA,
-            gesture.startB,
-            first,
-            second,
-          );
-          if (motion.movementA > TWO_FINGER_HOLD_SLOP || motion.movementB > TWO_FINGER_HOLD_SLOP) {
-            gesture.holdEligible = false;
-            clearTwoFingerHoldTimer(gesture);
-            logGestureDiagnostic("gesture-state", {
-              gesture: "two-finger-scroll",
-              state: "disarmed",
-              reason: "moved-before-hold",
-            });
+        const pinchMode = window.PCPhoneLinkGestures.classifyTwoFingerGesture(
+          gesture.startA,
+          gesture.startB,
+          first,
+          second,
+          TWO_FINGER_PINCH_THRESHOLD,
+        );
+        if (pinchMode === "pinch") {
+          gesture.mode = "pinch";
+          clearTwoFingerHoldTimer(gesture);
+        } else {
+          if (gesture.holdEligible && !gesture.scrollArmed) {
+            const motion = window.PCPhoneLinkGestures.twoFingerMotion(
+              gesture.startA,
+              gesture.startB,
+              first,
+              second,
+            );
+            if (motion.movementA > TWO_FINGER_HOLD_SLOP || motion.movementB > TWO_FINGER_HOLD_SLOP) {
+              gesture.holdEligible = false;
+              clearTwoFingerHoldTimer(gesture);
+              logGestureDiagnostic("gesture-state", {
+                gesture: "two-finger-scroll",
+                state: "disarmed",
+                reason: "moved-before-hold",
+              });
+            }
           }
+          return;
         }
-        return;
       }
       logGestureDiagnostic("gesture-classified", { gesture: gesture.mode, state: "active" }, { immediate: true });
       state.suppressPrimaryTapUp = true;
@@ -2869,9 +3243,9 @@ function handlePointerMove(event) {
         setCameraFocus(gesture.startFocus.x, gesture.startFocus.y);
       } else {
         showGestureStatus("Scroll");
-        const startMidpoint = getPointerMidpoint(gesture.armA, gesture.armB);
-        const startSource = viewerPointToSourceNormalized(startMidpoint.x, startMidpoint.y);
-        gesture.lastMidpoint = startMidpoint;
+        const dragPoint = state.activePointers.get(gesture.dragPointerId) || first;
+        const startSource = viewerPointToSourceNormalized(dragPoint.x, dragPoint.y);
+        gesture.lastDragPoint = { ...dragPoint };
         gesture.lastSourcePoint = startSource;
         if (state.controlMode === "touch" && startSource) sendPointer("touch_down", startSource);
       }
@@ -2883,18 +3257,19 @@ function handlePointerMove(event) {
       return;
     }
 
-    const midpoint = getPointerMidpoint(first, second);
+    const dragPoint = state.activePointers.get(gesture.dragPointerId)
+      || (gesture.dragPointerId === gesture.pointerIds[0] ? first : second);
     if (state.controlMode === "touch") {
-      const sourcePoint = viewerPointToSourceNormalized(midpoint.x, midpoint.y) || gesture.lastSourcePoint;
+      const sourcePoint = viewerPointToSourceNormalized(dragPoint.x, dragPoint.y) || gesture.lastSourcePoint;
       if (sourcePoint) {
         gesture.lastSourcePoint = sourcePoint;
         sendPointer("touch_move", sourcePoint);
       }
-    } else if (gesture.lastMidpoint) {
-      const deltaY = midpoint.y - gesture.lastMidpoint.y;
+    } else if (gesture.lastDragPoint) {
+      const deltaY = dragPoint.y - gesture.lastDragPoint.y;
       if (Math.abs(deltaY) >= 1) sendPointer("wheel_current", { delta: Math.round(-deltaY * 8) });
     }
-    gesture.lastMidpoint = midpoint;
+    gesture.lastDragPoint = { ...dragPoint };
     return;
   }
 
@@ -2916,7 +3291,7 @@ function handlePointerMove(event) {
   const wasDragActive = state.dragActive;
   if (!state.dragActive && (totalDeltaX > dragThreshold || totalDeltaY > dragThreshold)) {
     state.dragActive = true;
-    clearLongPress();
+    cancelPendingTap("drag");
     showGestureStatus(state.controlMode === "touch" ? "Pan viewer" : "Mouse move");
     logGestureDiagnostic(
       "gesture-classified",
@@ -2955,11 +3330,33 @@ function handlePointerUp(event) {
 
   if (state.twoFingerGesture && state.twoFingerGesture.pointerIds.includes(event.pointerId)) {
     event.preventDefault();
-    state.activePointers.delete(event.pointerId);
-    for (const pointerId of state.twoFingerGesture.pointerIds) {
-      if (elements.touchLayer.hasPointerCapture(pointerId)) elements.touchLayer.releasePointerCapture(pointerId);
+    const gesture = state.twoFingerGesture;
+    const pointerIndex = gesture.pointerIds.indexOf(event.pointerId);
+    const endPoint = { x: event.clientX, y: event.clientY };
+    if (pointerIndex === 0) {
+      gesture.endA = endPoint;
+      gesture.maxMovementA = Math.max(gesture.maxMovementA, getPointerDistance(gesture.startA, endPoint));
+    } else {
+      gesture.endB = endPoint;
+      gesture.maxMovementB = Math.max(gesture.maxMovementB, getPointerDistance(gesture.startB, endPoint));
     }
-    finishTwoFingerGesture();
+    state.activePointers.delete(event.pointerId);
+    if (elements.touchLayer.hasPointerCapture(event.pointerId)) {
+      elements.touchLayer.releasePointerCapture(event.pointerId);
+    }
+    if (gesture.mode || gesture.scrollArmed) {
+      for (const pointerId of gesture.pointerIds) {
+        if (elements.touchLayer.hasPointerCapture(pointerId)) elements.touchLayer.releasePointerCapture(pointerId);
+      }
+      finishTwoFingerGesture();
+      return;
+    }
+    clearTwoFingerHoldTimer(gesture);
+    gesture.holdEligible = false;
+    gesture.releasedPointerIds.add(event.pointerId);
+    if (gesture.releasedPointerIds.size === gesture.pointerIds.length) {
+      finishTwoFingerGesture({ recognizeTap: true });
+    }
     return;
   }
 
@@ -2983,8 +3380,12 @@ function handlePointerUp(event) {
         sendPointer("touch_up", releasePoint);
       }
     } else if (!didDrag) {
-      sendTapActionAtPoint(point);
-      showGestureStatus(state.tapMode === "right" ? "Right-click" : state.tapMode === "double" ? "Double-click" : "Tap");
+      if (state.tapMode === "left") {
+        queueAppTouchTap(point, { x: event.clientX, y: event.clientY });
+      } else {
+        sendTapActionAtPoint(point);
+        showGestureStatus(state.tapMode === "right" ? "Right-click" : "Double-click");
+      }
     }
 
     if (state.tapMode !== "left") {
@@ -3020,6 +3421,7 @@ function handlePointerUp(event) {
 }
 
 function handlePointerCancel(event) {
+  cancelPendingTap("pointer-cancel");
   logGestureDiagnostic("pointer-cancel", { phase: "cancel", reason: "browser", state: "reset" }, { immediate: true });
   if (state.twoFingerGesture && state.twoFingerGesture.pointerIds.includes(event.pointerId)) {
     state.activePointers.delete(event.pointerId);
@@ -3298,6 +3700,7 @@ function togglePowerMenu(force, source = "desktop") {
       window.requestAnimationFrame(() => menu.scrollIntoView({ block: "nearest", inline: "nearest" }));
     }
   }
+  renderBottomNav();
 }
 
 async function requestPowerAction(action) {
@@ -3373,7 +3776,12 @@ function handleTextSubmit(event) {
 }
 
 function openDestination(destination, { toggle = false } = {}) {
+  cancelPendingTap("navigation");
   const next = toggle && state.currentDestination === destination ? "viewer" : destination;
+  if (next === "viewer" && state.currentDestination !== "viewer"
+    && (state.pointerDown || state.activePointers.size || state.twoFingerGesture)) {
+    releaseActiveTouches();
+  }
   closePowerMenus();
   state.currentDestination = next;
   elements.windowDrawer.classList.remove("panel-open");
@@ -3394,6 +3802,7 @@ function openDestination(destination, { toggle = false } = {}) {
   document.querySelectorAll("[data-destination]").forEach((button) => {
     button.classList.toggle("active", button.dataset.destination === next);
   });
+  renderBottomNav();
   if (history.replaceState) history.replaceState(null, "", `#${next}`);
 }
 
@@ -3578,10 +3987,37 @@ document.addEventListener("click", (event) => {
     sendSpecialKey(specialKeyButton.dataset.specialKey).catch((error) => showToast(error.message));
     return;
   }
+  const editorButton = event.target.closest("[data-nav-editor-action]");
+  if (editorButton) {
+    const id = editorButton.dataset.shortcutId;
+    const index = state.bottomNavOptional.indexOf(id);
+    if (index < 0) return;
+    const next = [...state.bottomNavOptional];
+    if (editorButton.dataset.navEditorAction === "remove") next.splice(index, 1);
+    if (editorButton.dataset.navEditorAction === "up" && index > 0) {
+      [next[index - 1], next[index]] = [next[index], next[index - 1]];
+    }
+    if (editorButton.dataset.navEditorAction === "down" && index < next.length - 1) {
+      [next[index + 1], next[index]] = [next[index], next[index + 1]];
+    }
+    saveBottomNavConfig(next);
+    return;
+  }
+  const bottomAction = event.target.closest("[data-bottom-action]");
+  if (bottomAction) {
+    executeBottomNavAction(bottomAction.dataset.bottomAction).catch((error) => showToast(error.message));
+    return;
+  }
   const destinationButton = event.target.closest("[data-destination]");
-  if (destinationButton) openDestination(destinationButton.dataset.destination, { toggle: true });
+  if (destinationButton) {
+    openDestination(destinationButton.dataset.destination, { toggle: true });
+  }
 });
-elements.gestureHelpButton?.addEventListener("click", () => elements.gestureHelp?.showModal());
+elements.gestureHelpButton?.addEventListener("click", () => {
+  elements.gestureHelp?.showModal();
+  renderBottomNav();
+});
+elements.gestureHelp?.addEventListener("close", renderBottomNav);
 elements.gestureDiagnostics?.addEventListener("change", () => {
   state.gestureDiagnosticsEnabled = Boolean(elements.gestureDiagnostics.checked);
   window.localStorage.setItem(GESTURE_DIAGNOSTICS_STORAGE_KEY, String(state.gestureDiagnosticsEnabled));
@@ -3600,6 +4036,12 @@ elements.clearGestureLogs?.addEventListener("click", async () => {
   }
 });
 elements.installApp?.addEventListener("click", () => installApp().catch(() => showToast("Install could not start.")));
+elements.bottomNavAddButton?.addEventListener("click", () => {
+  const id = elements.bottomNavAdd?.value;
+  if (!id || state.bottomNavOptional.length >= MAX_OPTIONAL_BOTTOM_NAV) return;
+  saveBottomNavConfig([...state.bottomNavOptional, id]);
+});
+elements.bottomNavReset?.addEventListener("click", () => saveBottomNavConfig(DEFAULT_BOTTOM_NAV_OPTIONAL));
 elements.revealControls?.addEventListener("click", () => setControlsHidden(false));
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
@@ -3613,6 +4055,7 @@ window.addEventListener("appinstalled", () => {
 });
 
 function releaseActiveTouches() {
+  cancelPendingTap("lifecycle-release");
   if (state.twoFingerGesture) finishTwoFingerGesture({ canceled: true });
   else if (state.controlMode === "touch" && state.directTouchDownSent) {
     const point = state.lastSourcePoint || state.startSourcePoint;

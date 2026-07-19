@@ -6,7 +6,7 @@ Once paired, the phone browser becomes a remote control for a selected Windows w
 
 Open PC Phone Link in phone browser, then check **Settings > Home screen / app install**. Browser **Add to Home screen** can create a shortcut from normal LAN HTTP. Full PWA install, offline shell, and automatic app updates require a trusted HTTPS origin (or localhost); browsers do not grant service-worker privileges to a phone opening a plain LAN HTTP address. Authenticated pages and streams are never cached offline.
 
-Bottom navigation keeps Viewer, Windows, Keyboard, Controls, and Settings reachable on phones and iPads in portrait or landscape. iPad uses the same sheets, control placement, and interactions as phone; mouse-driven desktop browsers retain the desktop layout. **App touch** provides direct taps, one-finger viewer pan, hold-to-arm two-finger PC-content scroll, immediate pinch zoom, and one-finger long-press right-click. Hold both fingers mostly still until **Scroll ready**, then drag them together. Movement before Scroll ready does not scroll. One-finger drag never scrolls PC content. **Mouse trackpad** remains available under Controls with speed and follow-mouse settings.
+Bottom navigation defaults to Full screen, Windows, Keyboard, Controls, and Settings on phones and iPads. Tap an active item again to hide it and return Viewer; Keyboard also dismisses phone keyboard. Gesture help and Power controls likewise show/hide, while armed click shortcuts disarm on second tap. **Full screen** selects whole Windows desktop capture through normal window selection; second tap restores previously selected app, or closes desktop stream when none exists. It never changes browser fullscreen state. Settings lets each phone choose and reorder up to three optional shortcuts. Available shortcuts: Full screen, Windows, Keyboard, Gesture help, Right-click next tap, Double-click next tap, Fit, Power controls, and input-mode toggle. Power opens safe Settings controls and never runs a power command directly. Controls and Settings are fixed, enabled, and non-removable; Reset restores defaults. iPad uses same sheets and interactions as phone; mouse-driven desktop browsers retain desktop layout. **App touch** provides direct taps, double-tap right-click, quick two-finger-tap double-click, one-finger viewer pan, hold-to-arm two-finger PC-content scroll, and immediate pinch zoom. Hold both fingers mostly still until **Scroll ready**, then drag them together. Movement before Scroll ready does not scroll. One-finger drag never scrolls PC content. **Double-click next tap** also sends a PC double-click on next tap. **Mouse trackpad** remains available under Controls with speed and follow-mouse settings.
 
 Viewer gesture badge confirms detected Tap, Pan viewer, Scroll, Zoom, or Right-click. Recently used apps move to top of Windows list without storing window titles. Keyboard shortcut row sends Tab, Esc, arrows, Backspace, and Delete. Connection badge retries automatically after brief host or network loss.
 
@@ -15,7 +15,7 @@ Viewer gesture badge confirms detected Tap, Pan viewer, Scroll, Zoom, or Right-c
 ## Pick a window
 
 1. Open the **Windows** panel on the phone
-2. Select an application window from the list, or choose **Full screen** for desktop capture
+2. The viewer opens on **Full screen** (desktop capture) by default; open **Windows** anytime to switch to a specific app
 3. After activation succeeds, PC Phone Link closes the Windows sheet, opens Viewer, and starts the stream
 
 Viewer focus and zoom stay fixed across frames, reconnects, window-list refreshes, keyboard changes, navigation, stream-quality changes, and phone rotation. Only pan, pinch, zoom/reset, Fit, or another explicit control changes the view. **Phone Fit** resizes the selected PC window only when you press Fit or apply a screen-shape setting; viewport changes never refit it automatically. **Follow mouse** reacts only after a trackpad drag moves the PC mouse, not passive cursor updates.
@@ -24,7 +24,7 @@ Viewer focus and zoom stay fixed across frames, reconnects, window-list refreshe
 
 | Mode | Behavior |
 | ---- | -------- |
-| **App touch** (default) | Tap clicks directly; one finger pans viewer; hold two fingers for Scroll ready then drag to scroll PC content; pinch zooms; long press right-clicks; mouse cursor stays put |
+| **App touch** (default) | Tap clicks directly; double-tap right-clicks; quick two-finger tap double-clicks; one finger pans viewer; hold two fingers for Scroll ready then hold one finger and drag the other to scroll PC content; pinch zooms; mouse cursor stays put |
 | **Mouse trackpad** | Drag moves PC mouse; tap clicks; speed and follow-mouse settings remain configurable |
 
 ## Keyboard and text
@@ -85,7 +85,7 @@ Structured logs are written to:
 
 Check these files when diagnosing stream or pairing issues.
 
-Touch pipeline diagnostics use `%LOCALAPPDATA%\PC Phone Link\logs\gesture-events.jsonl`. Settings shows exact path and provides enable/disable and clear controls. Log is privacy-filtered and bounded: no typed text, tokens, connection codes, addresses, window names, or secrets; maximum 512 KiB plus three rotated files.
+Touch pipeline diagnostics use `%LOCALAPPDATA%\PC Phone Link\logs\gesture-events.jsonl`. Settings shows exact path and provides enable/disable and clear controls. Gesture delivery plus bottom-bar action/config state are recorded. Log is privacy-filtered and bounded: no typed text, tokens, connection codes, addresses, window names, or secrets; maximum 512 KiB plus three rotated files.
 
 ## Related docs
 

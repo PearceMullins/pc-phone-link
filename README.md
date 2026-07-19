@@ -33,7 +33,7 @@ Stream individual windows or your full desktop, send touch and keyboard input, m
 ## Features
 
 - **Window streaming** — Capture a single app window or fullscreen desktop with adaptive WebSocket streaming and MJPEG fallback
-- **Phone controls** — App touch, Mouse trackpad, viewer pan, hold-to-arm two-finger scroll, keyboard, special keys, and text input
+- **Phone controls** — App touch, Mouse trackpad, viewer pan, hold-to-arm one-finger-drag scroll, keyboard, special keys, and text input
 - **Window management** — List, focus, maximize, restore, and Phone Fit resize
 - **Connect code pairing** — Desktop GUI and phone show the same 4-digit code; tap Connect after confirming they match; remove connected phones from the PC window
 - **Power actions** — Lock, sleep, restart, shutdown from Settings on phone and iPad; desktop Power remains available
@@ -151,18 +151,18 @@ Once paired, the phone browser is your remote control.
 ### Pick a window
 
 1. Open the **Windows** panel on the phone
-2. Select an app window or **Full screen** for desktop capture
+2. The viewer opens on **Full screen** (desktop capture) by default; open **Windows** anytime to switch to a specific app
 3. After activation succeeds, PC Phone Link closes Windows, opens Viewer, and starts the stream
 
 Viewer focus and zoom remain stable through reconnects, stream refreshes, keyboard changes, navigation, and phone rotation. **Phone Fit** resizes the PC window only when explicitly requested; viewport changes never trigger an automatic refit.
 
-Phones and iPads use the same bottom navigation and Viewer, Windows, Keyboard, Controls, and Settings sheets in portrait and landscape. **Settings > PC power** exposes Lock, Sleep, Restart, and Shut down; destructive actions remain marked and confirmed.
+Phones and iPads default to Full screen, Windows, Keyboard, Controls, and Settings in bottom bar. Tap any active item again to hide or disarm it. **Full screen** selects whole Windows desktop capture; second tap restores previous app or closes desktop stream when no prior app exists. It never requests browser fullscreen. Settings lets each phone keep up to three optional shortcuts, reorder them, or reset defaults. Controls and Settings stay fixed and cannot be removed. Shortcut catalog includes destinations, gesture help, armed click modes, Fit, safe Power-controls access, and input-mode toggle. **Settings > PC power** exposes Lock, Sleep, Restart, and Shut down; destructive actions remain marked and confirmed.
 
 ### Input modes
 
 | Mode | Behavior |
 | ---- | -------- |
-| **App touch** (default) | Tap clicks directly; one finger pans viewer; hold two fingers for Scroll ready then drag to scroll PC content; pinch zooms; long press right-clicks; mouse cursor stays put |
+| **App touch** (default) | Tap clicks directly; double-tap right-clicks; quick two-finger tap double-clicks; one finger pans viewer; hold two fingers for Scroll ready then hold one finger and drag the other to scroll PC content; pinch zooms; mouse cursor stays put |
 | **Mouse trackpad** | Drag moves PC mouse; tap clicks; speed and follow-mouse settings remain configurable |
 
 ### Keyboard and streaming

@@ -10,7 +10,7 @@
   <title>PC Phone Link</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="/assets/styles.css?v=20260718a">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260818c">
 </head>
 <body>
   <div id="app">
@@ -32,13 +32,30 @@
         <input id="mouseSpeed" class="speed-slider" type="range" min="0.5" max="8" step="0.1" value="2.5">
         <label class="toggle-setting" for="followMouse"><span>Follow mouse</span><input id="followMouse" type="checkbox"></label>
         <button id="gestureHelpButton" class="ghost-button" type="button">Gesture help</button>
-        <div class="drawer-button-row"><button id="rightClickMode" class="ghost-button" type="button">Right-click next tap</button><button id="doubleClickMode" class="ghost-button" type="button">Double-click next tap</button></div>
+        <label class="setting-label"><span>Gestures</span></label>
+        <div class="drawer-button-row"><button id="clickMode" class="ghost-button" type="button">Click</button><button id="rightClickMode" class="ghost-button" type="button">Right-click</button><button id="doubleClickMode" class="ghost-button" type="button">Double-click</button></div>
+        <div class="drawer-button-row"><button id="panMode" class="ghost-button" type="button">Pan</button><button id="dragMode" class="ghost-button" type="button">Drag</button><button id="scrollMode" class="ghost-button" type="button">Scroll</button><button id="zoomMode" class="ghost-button" type="button">Zoom</button></div>
         <div class="drawer-button-row"><button id="scrollUp" class="ghost-button" type="button">Scroll up</button><button id="scrollDown" class="ghost-button" type="button">Scroll down</button></div>
         <div class="drawer-button-row"><button id="focusWindow" class="ghost-button" type="button">Focus</button><button id="maximizeWindow" class="ghost-button" type="button">Maximize</button><button id="restoreWindow" class="ghost-button" type="button">Restore</button></div>
         <label class="setting-label" for="fitShape"><span>Screen shape</span><strong id="fitShapeValue">Phone</strong></label>
         <select id="fitShape" class="setting-select"><option value="auto">Phone</option><option value="16-9">16:9</option><option value="16-10">16:10</option><option value="4-3">4:3</option><option value="1-1">Square</option><option value="3-4">Tall</option></select>
         <button id="applyFitShape" class="ghost-button" type="button" disabled>Apply shape</button>
       </section>
+    </aside>
+
+    <aside id="shortcutsPanel" class="mobile-panel utility-panel shortcuts-panel" data-panel="shortcuts" aria-label="Shortcuts">
+      <div class="drawer-header"><div><p class="eyebrow">Pointer mode</p><h1>Shortcuts</h1></div><span id="activeShortcut" class="active-shortcut" role="status">Gestures</span></div>
+      <p class="shortcut-menu-help">Choose a mode, then use it on the PC view. It stays enabled until you choose another. Gestures restores normal touch controls.</p>
+      <div id="shortcutMenu" class="shortcut-menu" aria-label="Pointer shortcuts">
+        <button type="button" data-pointer-shortcut="gestures"><strong>Gestures</strong><small>Normal touch controls</small></button>
+        <button type="button" data-pointer-shortcut="left"><strong>Left click</strong><small>Tap to click</small></button>
+        <button type="button" data-pointer-shortcut="right"><strong>Right click</strong><small>Tap to right-click</small></button>
+        <button type="button" data-pointer-shortcut="double"><strong>Double left click</strong><small>Tap to double-click</small></button>
+        <button type="button" data-pointer-shortcut="scroll"><strong>Scroll</strong><small>Drag up or down</small></button>
+        <button type="button" data-pointer-shortcut="drag"><strong>Click + drag</strong><small>Drag files and controls</small></button>
+        <button type="button" data-pointer-shortcut="pan"><strong>Pan view</strong><small>Drag the enlarged view</small></button>
+        <button type="button" data-pointer-shortcut="zoom"><strong>Zoom view</strong><small>Drag up or down to zoom</small></button>
+      </div>
     </aside>
 
     <aside id="settingsPanel" class="mobile-panel utility-panel" data-panel="settings" aria-label="Settings">
@@ -56,7 +73,7 @@
         <input id="textScale" class="speed-slider" type="range" min="100" max="225" step="1" value="100">
         <button id="applyTextScale" class="ghost-button" type="button" disabled>Apply text size</button>
         <div class="drawer-button-row"><button id="textSmaller" class="ghost-button" type="button">Smaller</button><button id="textLarger" class="ghost-button" type="button">Larger</button></div>
-        <section class="bottom-nav-settings" aria-labelledby="bottomNavTitle"><strong id="bottomNavTitle">Bottom bar</strong><p class="setting-help">Choose up to three shortcuts. Controls and Settings always stay available.</p><div id="bottomNavEditor" class="bottom-nav-editor"></div><div class="bottom-nav-add-row"><label class="sr-only" for="bottomNavAdd">Add shortcut</label><select id="bottomNavAdd" class="setting-select" aria-label="Shortcut to add"></select><button id="bottomNavAddButton" class="ghost-button" type="button">Add</button></div><button id="bottomNavReset" class="ghost-button" type="button">Reset bottom bar</button></section>
+        <section class="bottom-nav-settings" aria-labelledby="bottomNavTitle"><strong id="bottomNavTitle">Bottom bar</strong><p class="setting-help">Choose up to three shortcuts. Shortcuts, Controls, and Settings always stay available.</p><div id="bottomNavEditor" class="bottom-nav-editor"></div><div class="bottom-nav-add-row"><label class="sr-only" for="bottomNavAdd">Add shortcut</label><select id="bottomNavAdd" class="setting-select" aria-label="Shortcut to add"></select><button id="bottomNavAddButton" class="ghost-button" type="button">Add</button></div><button id="bottomNavReset" class="ghost-button" type="button">Reset bottom bar</button></section>
         <section class="settings-power-section" aria-labelledby="settingsPowerTitle"><div class="settings-power-header"><strong id="settingsPowerTitle">PC power</strong><button id="settingsPowerToggle" class="ghost-button compact-button" type="button" aria-expanded="false" aria-controls="settingsPowerMenu" aria-haspopup="true">Power controls</button></div><div id="settingsPowerMenu" class="settings-power-menu hidden"><button type="button" class="power-menu-item" data-power-action="lock">Lock</button><button type="button" class="power-menu-item" data-power-action="sleep">Sleep</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="restart">Restart</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="shutdown">Shut down</button></div></section>
         <section class="trusted-devices-section"><div class="trusted-devices-header"><span>Trusted phones</span><button id="refreshTrustedDevices" class="ghost-button compact-button" type="button">Refresh</button></div><p id="trustedDevicesStatus" class="trusted-devices-status">No saved phones loaded.</p><div id="trustedDevices" class="trusted-devices-list"></div></section>
         <section class="diagnostics-section"><label class="toggle-setting" for="gestureDiagnostics"><span>Gesture diagnostics</span><input id="gestureDiagnostics" type="checkbox" checked></label><p class="setting-help">Records gesture states, safe coordinates, delivery results, and Windows touch errors. Never records typed text, connection codes, addresses, tokens, or window names.</p><p id="gestureLogPath" class="diagnostics-path">Log path loads after connection.</p><button id="clearGestureLogs" class="ghost-button" type="button">Clear gesture logs</button></section>
@@ -85,6 +102,7 @@
     <div id="toast" class="toast hidden"></div>
   </div>
   <script src="/assets/gestures.js?v=20260718a" defer></script>
-  <script src="/assets/app.js?v=20260718a" defer></script>
+  <script src="/assets/gesture-arms.js?v=20260818c" defer></script>
+  <script src="/assets/app.js?v=20260818c" defer></script>
 </body>
 </html>

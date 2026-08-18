@@ -20,10 +20,12 @@ MAX_LOG_FILES = 4
 _WRITE_LOCK = threading.Lock()
 _CONTEXT: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar("gesture_diagnostics", default={})
 _ALLOWED_DETAILS = {
-    "action", "client_time", "control_mode", "delta", "delta_x", "delta_y", "duration_ms",
-    "error_code", "error_type", "flags", "gesture", "gesture_id", "mode", "phase", "pointer_count",
-    "pointer_type", "reason", "recovered", "request_id", "result", "session_id", "state", "target",
-    "x", "y",
+    "action", "buttons", "capture", "client_queued_at_ms", "client_time", "coalesced_count",
+    "control_mode", "default_prevented", "delta", "delta_x", "delta_y", "duration_ms", "error_code",
+    "error_type", "event_time_ms", "flags", "gesture", "gesture_id", "in_flight", "is_primary",
+    "latency_ms", "mode", "phase", "pointer_count", "pointer_type", "pressure", "queue_depth",
+    "queue_wait_ms", "reason", "recovered", "request_id", "result", "sequence", "session_id",
+    "shortcut", "state", "target", "touch_action", "x", "y",
 }
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 _SAFE_LABEL = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
@@ -105,12 +107,15 @@ def _safe_details(details: dict[str, Any]) -> dict[str, Any]:
             continue
         if normalized in {"request_id", "session_id", "gesture_id"}:
             safe[normalized] = str(value) if _IDENTIFIER.fullmatch(str(value)) else "invalid"
-        elif normalized in {"x", "y", "delta_x", "delta_y"}:
+        elif normalized in {"x", "y", "delta_x", "delta_y", "pressure"}:
             try:
                 safe[normalized] = round(float(value), 4)
             except (TypeError, ValueError):
                 continue
-        elif normalized in {"pointer_count", "delta", "duration_ms", "error_code", "flags"}:
+        elif normalized in {
+            "buttons", "client_queued_at_ms", "coalesced_count", "delta", "duration_ms", "error_code",
+            "event_time_ms", "flags", "latency_ms", "queue_depth", "queue_wait_ms", "pointer_count", "sequence",
+        }:
             try:
                 safe[normalized] = int(value)
             except (TypeError, ValueError):
@@ -122,6 +127,8 @@ def _safe_details(details: dict[str, Any]) -> dict[str, Any]:
             candidate = str(value)
             if re.fullmatch(r"[0-9T:+.Z-]{1,40}", candidate):
                 safe[normalized] = candidate
+        elif normalized in {"capture", "default_prevented", "in_flight", "is_primary"}:
+            safe[normalized] = value if isinstance(value, bool) else str(value).strip().lower() == "true"
         else:
             candidate = str(sanitize_for_logging(value))
             safe[normalized] = candidate if _SAFE_LABEL.fullmatch(candidate) else "invalid"

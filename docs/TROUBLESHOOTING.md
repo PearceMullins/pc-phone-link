@@ -67,7 +67,7 @@ This is a browser security limit. On HTTP over LAN, use the **keyboard microphon
 3. Review `%LOCALAPPDATA%\PC Phone Link\logs\gesture-events.jsonl` on PC. Rotated history uses `.1`, `.2`, and `.3` suffixes.
 4. Restart host and refresh installed phone app after updating; service worker then replaces old gesture code.
 
-Gesture log correlates phone recognizer, HTTP dispatch, and Windows touch frames. It records timestamps, random session/request/gesture IDs, control mode, gesture states, pointer count/type, normalized coordinates/deltas, actions, Win32 flags/results/error codes, and recovery. It never records typed text, tokens, connection codes, IP addresses, window titles, or secrets. File is capped at 512 KiB with three rotated files. Disable or clear it from **Settings**.
+Gesture log correlates phone pointer lifecycle with browser queueing, server receipt, and Windows input. It records timestamps, random session/request/gesture IDs, selected shortcut, control mode, pointer count/type, normalized coordinates/deltas, preventDefault and pointer-capture state, coalescing/queue/send/ack timing, actions, Win32 results/error codes, and recovery. It never records typed text, tokens, connection codes, IP addresses, window titles, or secrets. File is capped at 512 KiB with three rotated files. Disable or clear it from **Settings**; Clear cancels pending browser log uploads before removing current and rotated files.
 
 ## Wake-on-LAN does not work
 

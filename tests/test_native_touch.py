@@ -124,6 +124,28 @@ class NativeTouchTests(unittest.TestCase):
         native_touch.assert_called_once_with("touch_tap", 59, 119, gesture_id="")
         set_cursor.assert_not_called()
 
+    def test_pointer_action_logs_win32_start_result_and_error(self) -> None:
+        with (
+            mock.patch.object(windows_host, "_handle_pointer_impl") as implementation,
+            mock.patch.object(windows_host, "log_gesture") as log,
+        ):
+            windows_host.handle_pointer(55, "wheel_current", 0.5, 0.5, delta=120)
+
+        implementation.assert_called_once_with(55, "wheel_current", 0.5, 0.5, 120, 0.0, 0.0, gesture_id="")
+        self.assertEqual(log.call_args_list[0], mock.call("win32-action-start", {"action": "wheel_current", "state": "dispatch"}))
+        self.assertEqual(log.call_args_list[-1].args[0], "win32-action-result")
+        self.assertEqual(log.call_args_list[-1].args[1]["result"], "ok")
+
+        with (
+            mock.patch.object(windows_host, "_handle_pointer_impl", side_effect=OSError(87, "failed")),
+            mock.patch.object(windows_host, "log_gesture") as error_log,
+        ):
+            with self.assertRaises(OSError):
+                windows_host.handle_pointer(55, "down", 0.5, 0.5)
+
+        self.assertEqual(error_log.call_args_list[-1].args[0], "win32-action-error")
+        self.assertEqual(error_log.call_args_list[-1].kwargs["level"], "error")
+
     def test_touch_drag_focuses_once_on_down(self) -> None:
         with (
             mock.patch.object(windows_host, "_ensure_window", return_value=55),

@@ -28,6 +28,13 @@ class GestureDiagnosticsTests(unittest.TestCase):
                             "client_host": "192.168.1.2",
                             "window_title": "Private document",
                             "reason": "Private document title",
+                            "shortcut": "scroll",
+                            "capture": True,
+                            "default_prevented": True,
+                            "queue_depth": 2,
+                            "latency_ms": 17.8,
+                            "coalesced_count": 3,
+                            "touch_action": "none",
                         },
                     )
                 payload = json.loads(path.read_text(encoding="utf-8"))
@@ -35,6 +42,10 @@ class GestureDiagnosticsTests(unittest.TestCase):
             self.assertEqual(payload["details"]["session_id"], "session-1")
             self.assertEqual(payload["details"]["request_id"], "request-1")
             self.assertEqual(payload["details"]["x"], 0.1235)
+            self.assertEqual(payload["details"]["shortcut"], "scroll")
+            self.assertIs(payload["details"]["capture"], True)
+            self.assertEqual(payload["details"]["queue_depth"], 2)
+            self.assertEqual(payload["details"]["coalesced_count"], 3)
             serialized = json.dumps(payload)
             for private_value in ("secret-token", "typed secret", "192.168.1.2", "Private document"):
                 self.assertNotIn(private_value, serialized)

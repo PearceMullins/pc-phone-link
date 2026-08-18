@@ -117,7 +117,7 @@ Runtime data (tokens, paired browsers, logs) is stored under:
 %LOCALAPPDATA%\PC Phone Link\
 ```
 
-Touch diagnostics: `%LOCALAPPDATA%\PC Phone Link\logs\gesture-events.jsonl`. Phone Settings shows path and clear/disable controls. Log excludes typed text, tokens, connection codes, IP addresses, window titles, and secrets; bounded rotation prevents unlimited growth.
+Touch diagnostics: `%LOCALAPPDATA%\PC Phone Link\logs\gesture-events.jsonl`. Phone Settings shows path and clear/disable controls. Entries correlate browser pointer/capture state, selected shortcut, request queue/send/ack latency, server receipt, and Windows action results. Clear also discards pending browser log batches. Log excludes typed text, tokens, connection codes, IP addresses, window titles, and secrets; bounded rotation prevents unlimited growth.
 
 ## Pairing
 
@@ -156,7 +156,7 @@ Once paired, the phone browser is your remote control.
 
 Viewer focus and zoom remain stable through reconnects, stream refreshes, keyboard changes, navigation, and phone rotation. **Phone Fit** resizes the PC window only when explicitly requested; viewport changes never trigger an automatic refit.
 
-Phones and iPads default to Full screen, Windows, Keyboard, Controls, and Settings in bottom bar. Tap any active item again to hide or disarm it. **Full screen** selects whole Windows desktop capture; second tap restores previous app or closes desktop stream when no prior app exists. It never requests browser fullscreen. Settings lets each phone keep up to three optional shortcuts, reorder them, or reset defaults. Controls and Settings stay fixed and cannot be removed. Shortcut catalog includes destinations, gesture help, armed click modes, Fit, safe Power-controls access, and input-mode toggle. **Settings > PC power** exposes Lock, Sleep, Restart, and Shut down; destructive actions remain marked and confirmed.
+Phones and iPads default to Full screen, Windows, Keyboard, Shortcuts, Controls, and Settings in bottom bar. **Shortcuts** opens a thumb-reachable bottom sheet with persistent pointer modes: Gestures, Left click, Right click, Double left click, Scroll, Click + drag, Pan view, and Zoom view. Gestures restores normal touch controls. Choosing any mode immediately returns to PC view; mode stays enabled across uses and reloads until another is chosen. Drag modes start on touch-down, continue even when browser pointer capture is unavailable, and suppress competing viewer gestures. Scroll coalesces updates to avoid network backlog; Click + drag always holds the Windows left mouse button; Pan view raises a fit-sized view to 2x before moving it; Zoom view responds without a snap dead zone. Tap another active destination again to hide it. **Full screen** selects whole Windows desktop capture; second tap restores previous app or closes desktop stream when no prior app exists. It never requests browser fullscreen. Settings lets each phone keep up to three optional shortcuts, reorder them, or reset defaults. Shortcuts, Controls, and Settings stay fixed and cannot be removed. Optional catalog includes destinations, gesture help, click modes, Fit, safe Power-controls access, and input-mode toggle. **Settings > PC power** exposes Lock, Sleep, Restart, and Shut down; destructive actions remain marked and confirmed.
 
 ### Input modes
 

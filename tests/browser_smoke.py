@@ -119,11 +119,13 @@ def main() -> None:
                     {"features": [{"name": "display-mode", "value": "standalone" if standalone else "browser"}]},
                 )
                 time.sleep(0.1)
-                for destination in ("viewer", "windows", "keyboard", "controls", "settings"):
+                for destination in ("viewer", "windows", "keyboard", "shortcuts", "controls", "settings"):
                     report = browser.evaluate(
                         f"""(() => {{
                           openDestination({destination!r});
+                          if ({destination!r} === 'shortcuts') elements.shortcutMenu.scrollTop = elements.shortcutMenu.scrollHeight;
                           const panel = {destination!r} === 'windows' ? elements.windowDrawer
+                            : {destination!r} === 'shortcuts' ? elements.shortcutsPanel
                             : {destination!r} === 'controls' ? elements.controlsPanel
                             : {destination!r} === 'settings' ? elements.settingsPanel : null;
                           const nav = elements.mobileNav.getBoundingClientRect();
@@ -147,9 +149,10 @@ def main() -> None:
                             panelRight: visible?.right ?? innerWidth,
                             panelOverflow: panel ? panel.scrollWidth - panel.clientWidth : 0,
                             keyboardOpen: !elements.keyboardPanel.classList.contains('hidden'),
-                            controls: ['bottomNavEditor','bottomNavAdd','bottomNavReset','rightClickMode','doubleClickMode','scrollUp','scrollDown','focusWindow','maximizeWindow','restoreWindow','fitShape','streamFps','streamWidth','textScale','refreshTrustedDevices','voiceInput','powerToggle','fitToggle','toggleKeyboard','toggleControls'].every(id => document.getElementById(id)) && document.querySelectorAll('[data-special-key]').length === 8,
+                            controls: ['bottomNavEditor','bottomNavAdd','bottomNavReset','clickMode','rightClickMode','doubleClickMode','panMode','dragMode','scrollMode','zoomMode','scrollUp','scrollDown','focusWindow','maximizeWindow','restoreWindow','shortcutsPanel','shortcutMenu','activeShortcut','fitShape','streamFps','streamWidth','textScale','refreshTrustedDevices','voiceInput','powerToggle','fitToggle','toggleKeyboard','toggleControls'].every(id => document.getElementById(id)) && document.querySelectorAll('[data-special-key]').length === 8 && document.querySelectorAll('[data-pointer-shortcut]').length === 8,
+                            shortcutBottom: {destination!r} === 'shortcuts' ? elements.shortcutMenu.lastElementChild.getBoundingClientRect().bottom : 0,
                             bottomActions: Array.from(elements.mobileNav.querySelectorAll('[data-bottom-action]')).map(button => button.dataset.bottomAction),
-                            mandatoryEnabled: ['controls','settings'].every(id => !elements.mobileNav.querySelector(`[data-bottom-action="${id}"]`)?.disabled),
+                            mandatoryEnabled: ['shortcuts','controls','settings'].every(id => !elements.mobileNav.querySelector(`[data-bottom-action="${id}"]`)?.disabled),
                             restoredMouseControls: ['controlMode','mouseSpeed','mouseSpeedValue','followMouse'].every(id => document.getElementById(id)) && Array.from(elements.controlMode.options).some(option => option.textContent === 'Mouse trackpad'),
                             removedModeBadge: !document.getElementById('controlModeBadge') && !document.querySelector('.viewer-status span'),
                           }};
@@ -165,8 +168,11 @@ def main() -> None:
                         assert abs(report["viewerBottom"] - report["navTop"]) <= 1, report
                     assert report["panelLeft"] >= -1 and report["panelRight"] <= width + 1, report
                     assert report["panelOverflow"] <= 1, report
+                    if destination == "shortcuts":
+                        assert report["shortcutBottom"] <= report["navTop"] + 1, report
+                        assert report["shortcutBottom"] >= report["navTop"] - 20, report
                     assert report["controls"], report
-                    assert report["bottomActions"] == ["desktop", "windows", "keyboard", "controls", "settings"], report
+                    assert report["bottomActions"] == ["desktop", "windows", "keyboard", "shortcuts", "controls", "settings"], report
                     assert report["mandatoryEnabled"], report
                     assert report["restoredMouseControls"], report
                     assert report["removedModeBadge"], report
@@ -233,6 +239,70 @@ def main() -> None:
                 {"width": 390, "height": 844, "deviceScaleFactor": 2, "mobile": True},
             )
             browser.call("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": 5})
+
+            browser.evaluate(
+                """(() => {
+                  window.__realTouchActions = [];
+                  window.__realTouchEvents = [];
+                  window.__realTouchSendPointer = sendPointer;
+                  window.__realTouchViewerPoint = viewerPointToSourceNormalized;
+                  window.__realTouchHandler = event => window.__realTouchEvents.push({
+                    type: event.type,
+                    pointerType: event.pointerType,
+                    pointerId: event.pointerId,
+                    defaultPrevented: event.defaultPrevented,
+                  });
+                  for (const type of ['pointerdown','pointermove','pointerup','pointercancel']) {
+                    elements.touchLayer.addEventListener(type, window.__realTouchHandler);
+                  }
+                  sendPointer = (action, payload = {}) => window.__realTouchActions.push({ action, payload });
+                  viewerPointToSourceNormalized = (x, y) => ({ x: x / 390, y: y / 844 });
+                  state.selectedWindow = { hwnd: 1 };
+                  openDestination('viewer');
+                })()"""
+            )
+
+            def dispatch_real_drag(mode: str) -> dict:
+                browser.evaluate(
+                    f"window.__realTouchActions.length=0; window.__realTouchEvents.length=0; setCameraScale({1 if mode == 'pan' else 2}); setCameraFocus(0.5,0.5); setGestureArm({mode!r});"
+                )
+                browser.call(
+                    "Input.dispatchTouchEvent",
+                    {"type": "touchStart", "touchPoints": [{"x": 195, "y": 320, "id": 1, "radiusX": 5, "radiusY": 5, "force": 1}]},
+                )
+                browser.call(
+                    "Input.dispatchTouchEvent",
+                    {"type": "touchMove", "touchPoints": [{"x": 195, "y": 250, "id": 1, "radiusX": 5, "radiusY": 5, "force": 1}]},
+                )
+                browser.call(
+                    "Input.dispatchTouchEvent",
+                    {"type": "touchMove", "touchPoints": [{"x": 195, "y": 180, "id": 1, "radiusX": 5, "radiusY": 5, "force": 1}]},
+                )
+                browser.call("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+                time.sleep(0.05)
+                return browser.evaluate(
+                    "({events:[...window.__realTouchEvents],actions:window.__realTouchActions.map(item=>item.action),camera:{scale:state.cameraScale,focus:{...state.cameraFocus}},mode:state.gestureArm,pointerDown:state.pointerDown,active:state.activePointers.size})"
+                )
+
+            real_touch_report = {mode: dispatch_real_drag(mode) for mode in ("scroll", "drag", "pan", "zoom")}
+            browser.evaluate(
+                """(() => {
+                  for (const type of ['pointerdown','pointermove','pointerup','pointercancel']) {
+                    elements.touchLayer.removeEventListener(type, window.__realTouchHandler);
+                  }
+                  sendPointer = window.__realTouchSendPointer;
+                  viewerPointToSourceNormalized = window.__realTouchViewerPoint;
+                  state.selectedWindow = null;
+                  setGestureArm('gestures');
+                })()"""
+            )
+            for mode, report in real_touch_report.items():
+                assert [event["type"] for event in report["events"]] == ["pointerdown", "pointermove", "pointermove", "pointerup"], (mode, report)
+                assert report["mode"] == mode and report["pointerDown"] is False and report["active"] == 0, (mode, report)
+            assert real_touch_report["scroll"]["actions"] == ["wheel_current", "wheel_current"], real_touch_report
+            assert real_touch_report["drag"]["actions"] == ["down", "move", "move", "up"], real_touch_report
+            assert real_touch_report["pan"]["actions"] == [] and real_touch_report["pan"]["camera"]["scale"] >= 2, real_touch_report
+            assert real_touch_report["zoom"]["actions"] == [] and real_touch_report["zoom"]["camera"]["scale"] > 2, real_touch_report
 
             selection_report = browser.evaluate(
                 """(async () => {
@@ -408,11 +478,13 @@ def main() -> None:
                     ? elements.windowDrawer.classList.contains('panel-open')
                     : id === 'keyboard'
                       ? !elements.keyboardPanel.classList.contains('hidden')
+                      : id === 'shortcuts'
+                        ? elements.shortcutsPanel.classList.contains('panel-open')
                       : id === 'controls'
                         ? elements.controlsPanel.classList.contains('panel-open')
                         : elements.settingsPanel.classList.contains('panel-open');
                   const destinationToggles = {};
-                  for (const id of ['windows', 'keyboard', 'controls', 'settings']) {
+                  for (const id of ['windows', 'keyboard', 'shortcuts', 'controls', 'settings']) {
                     openDestination('viewer');
                     const tapDestination = () => elements.mobileNav.querySelector(`[data-bottom-action="${id}"]`).click();
                     tapDestination();
@@ -425,6 +497,7 @@ def main() -> None:
                     tapDestination();
                     const hidden = state.currentDestination === 'viewer'
                       && !elements.windowDrawer.classList.contains('panel-open')
+                      && !elements.shortcutsPanel.classList.contains('panel-open')
                       && !elements.controlsPanel.classList.contains('panel-open')
                       && !elements.settingsPanel.classList.contains('panel-open')
                       && elements.keyboardPanel.classList.contains('hidden')
@@ -447,6 +520,26 @@ def main() -> None:
                   }));
                   const mandatoryEditorLocked = Array.from(elements.bottomNavEditor.querySelectorAll('.mandatory button')).every(button => button.disabled);
 
+                  localStorage.removeItem(POINTER_SHORTCUT_STORAGE_KEY);
+                  setGestureArm('gestures');
+                  openDestination('shortcuts');
+                  const shortcutMenuShown = state.currentDestination === 'shortcuts'
+                    && elements.shortcutsPanel.classList.contains('panel-open');
+                  elements.shortcutMenu.querySelector('[data-pointer-shortcut="right"]').click();
+                  const shortcutSelection = {
+                    menuShown: shortcutMenuShown,
+                    mode: state.gestureArm,
+                    stored: localStorage.getItem(POINTER_SHORTCUT_STORAGE_KEY),
+                    destination: state.currentDestination,
+                    panelHidden: !elements.shortcutsPanel.classList.contains('panel-open'),
+                    selected: elements.shortcutMenu.querySelector('[data-pointer-shortcut="right"]').getAttribute('aria-pressed'),
+                    badge: elements.activeShortcut.textContent,
+                  };
+                  loadGestureShortcut();
+                  shortcutSelection.reloadedMode = state.gestureArm;
+                  elements.shortcutMenu.querySelector('[data-pointer-shortcut="gestures"]').click();
+                  shortcutSelection.gesturesMode = state.gestureArm;
+
                   saveBottomNavConfig(['rightClick', 'gestureHelp']);
                   elements.bottomNavAdd.value = 'doubleClick';
                   elements.bottomNavAddButton.click();
@@ -457,16 +550,16 @@ def main() -> None:
                     editor: elements.bottomNavEditor.scrollWidth - elements.bottomNavEditor.clientWidth,
                   };
                   elements.mobileNav.querySelector('[data-bottom-action="rightClick"]').click();
-                  const rightClickArmed = state.tapMode === 'right'
+                  const rightClickArmed = state.gestureArm === 'right'
                     && elements.mobileNav.querySelector('[data-bottom-action="rightClick"]').getAttribute('aria-pressed') === 'true';
                   elements.mobileNav.querySelector('[data-bottom-action="rightClick"]').click();
-                  const rightClickDisarmed = state.tapMode === 'left'
+                  const rightClickDisarmed = state.gestureArm === 'gestures'
                     && elements.mobileNav.querySelector('[data-bottom-action="rightClick"]').getAttribute('aria-pressed') === 'false';
                   elements.mobileNav.querySelector('[data-bottom-action="doubleClick"]').click();
-                  const doubleClickArmed = state.tapMode === 'double'
+                  const doubleClickArmed = state.gestureArm === 'double'
                     && elements.mobileNav.querySelector('[data-bottom-action="doubleClick"]').getAttribute('aria-pressed') === 'true';
                   elements.mobileNav.querySelector('[data-bottom-action="doubleClick"]').click();
-                  const doubleClickDisarmed = state.tapMode === 'left'
+                  const doubleClickDisarmed = state.gestureArm === 'gestures'
                     && elements.mobileNav.querySelector('[data-bottom-action="doubleClick"]').getAttribute('aria-pressed') === 'false';
                   elements.mobileNav.querySelector('[data-bottom-action="gestureHelp"]').click();
                   const gestureShown = elements.gestureHelp.open;
@@ -515,11 +608,11 @@ def main() -> None:
                   state.defaultDesktopHandled = false;
                   state.windows = [];
                   resetViewer();
-                  return { defaults, defaultDesktop, defaultDesktopOnce, desktopSelection, desktopRestore, cameraBeforeToggles, unavailableMessage, destinationToggles, cameraAfterDestinationToggles, selectedAfterDestinationToggles, mandatoryOnly, mandatoryEditorLocked, reordered, customOverflow, rightClickArmed, rightClickDisarmed, doubleClickArmed, doubleClickDisarmed, gestureShown, gestureHidden, gestureShownAgain, persisted, sanitized, storedSanitized, power, navOverflow, reset, storedReset };
+                  return { defaults, defaultDesktop, defaultDesktopOnce, desktopSelection, desktopRestore, cameraBeforeToggles, unavailableMessage, destinationToggles, cameraAfterDestinationToggles, selectedAfterDestinationToggles, mandatoryOnly, mandatoryEditorLocked, shortcutSelection, reordered, customOverflow, rightClickArmed, rightClickDisarmed, doubleClickArmed, doubleClickDisarmed, gestureShown, gestureHidden, gestureShownAgain, persisted, sanitized, storedSanitized, power, navOverflow, reset, storedReset };
                 })()""",
                 await_promise=True,
             )
-            assert nav_report["defaults"] == ["desktop", "windows", "keyboard", "controls", "settings"], nav_report
+            assert nav_report["defaults"] == ["desktop", "windows", "keyboard", "shortcuts", "controls", "settings"], nav_report
             assert nav_report["defaultDesktop"] == {
                 "selected": True,
                 "hwnd": -1,
@@ -548,10 +641,22 @@ def main() -> None:
             assert nav_report["cameraAfterDestinationToggles"] == nav_report["cameraBeforeToggles"], nav_report
             assert nav_report["selectedAfterDestinationToggles"] == 777, nav_report
             assert nav_report["mandatoryOnly"] == [
+                {"id": "shortcuts", "disabled": False},
                 {"id": "controls", "disabled": False},
                 {"id": "settings", "disabled": False},
             ], nav_report
             assert nav_report["mandatoryEditorLocked"], nav_report
+            assert nav_report["shortcutSelection"] == {
+                "menuShown": True,
+                "mode": "right",
+                "stored": "right",
+                "destination": "viewer",
+                "panelHidden": True,
+                "selected": "true",
+                "badge": "Right click",
+                "reloadedMode": "right",
+                "gesturesMode": "gestures",
+            }, nav_report
             assert nav_report["reordered"] == ["gestureHelp", "rightClick", "doubleClick"], nav_report
             assert nav_report["customOverflow"]["nav"] <= 1 and nav_report["customOverflow"]["editor"] <= 1, nav_report
             assert nav_report["rightClickArmed"], nav_report
@@ -571,6 +676,101 @@ def main() -> None:
             assert nav_report["navOverflow"] <= 1, nav_report
             assert nav_report["reset"] == ["desktop", "windows", "keyboard"] and nav_report["storedReset"] == nav_report["reset"], nav_report
 
+            wheel_report = browser.evaluate(
+                """(async () => {
+                  const realApiFetch = apiFetch;
+                  const requests = [];
+                  const resolvers = [];
+                  apiFetch = (path, options) => {
+                    const payload = JSON.parse(options.body);
+                    requests.push({ path, delta: payload.delta });
+                    return new Promise(resolve => resolvers.push(resolve));
+                  };
+                  state.gestureDiagnosticsEnabled = true;
+                  state.gestureLogBuffer = [];
+                  state.selectedWindow = { hwnd: 432 };
+                  state.pendingWheelPayload = null;
+                  state.pendingWheelHwnd = null;
+                  state.wheelRequestInFlight = false;
+                  sendPointer('wheel_current', { delta: 10 });
+                  sendPointer('wheel_current', { delta: 20 });
+                  sendPointer('wheel_current', { delta: 30 });
+                  for (let attempt = 0; attempt < 20 && requests.length < 1; attempt += 1) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                  }
+                  const requestsBeforeRelease = requests.length;
+                  resolvers.shift()({});
+                  for (let attempt = 0; attempt < 20 && requests.length < 2; attempt += 1) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                  }
+                  const deltas = requests.map(request => request.delta);
+                  const paths = requests.map(request => request.path);
+                  resolvers.shift()({});
+                  await new Promise(resolve => setTimeout(resolve, 0));
+                  const diagnosticEvents = state.gestureLogBuffer.map(entry => entry.event);
+                  const diagnosticDetails = state.gestureLogBuffer
+                    .filter(entry => ['browser-action-queued','browser-action-sent','browser-action-ack'].includes(entry.event))
+                    .map(entry => entry.details);
+                  apiFetch = realApiFetch;
+                  state.selectedWindow = null;
+                  state.pendingWheelPayload = null;
+                  state.pendingWheelHwnd = null;
+                  state.wheelRequestInFlight = false;
+                  return { requestsBeforeRelease, deltas, paths, diagnosticEvents, diagnosticDetails };
+                })()""",
+                await_promise=True,
+            )
+            assert wheel_report["requestsBeforeRelease"] == 1, wheel_report
+            assert wheel_report["deltas"] == [10, 50], wheel_report
+            assert wheel_report["paths"] == ["/api/windows/432/pointer", "/api/windows/432/pointer"], wheel_report
+            for event in ("browser-action-queued", "browser-action-sent", "browser-action-ack", "browser-action-coalesced"):
+                assert event in wheel_report["diagnosticEvents"], wheel_report
+            assert all(
+                "request_id" in details and "shortcut" in details and "queue_depth" in details
+                for details in wheel_report["diagnosticDetails"]
+            ), wheel_report
+
+            clear_report = browser.evaluate(
+                """(async () => {
+                  const realFetch = window.fetch;
+                  const realToken = state.token;
+                  const startGeneration = state.gestureLogGeneration;
+                  let requestAborted = false;
+                  window.fetch = (_path, options) => new Promise((_resolve, reject) => {
+                    options.signal.addEventListener('abort', () => {
+                      requestAborted = true;
+                      reject(new DOMException('Aborted', 'AbortError'));
+                    }, { once: true });
+                  });
+                  state.token = 'test-token';
+                  state.gestureLogBuffer = [{ event: 'test', at: new Date().toISOString(), details: {} }];
+                  flushGestureDiagnostics();
+                  const flushStarted = state.gestureLogFlushInFlight;
+                  resetPendingGestureDiagnostics();
+                  await new Promise(resolve => setTimeout(resolve, 0));
+                  const report = {
+                    flushStarted,
+                    requestAborted,
+                    generationAdvanced: state.gestureLogGeneration === startGeneration + 1,
+                    inFlight: state.gestureLogFlushInFlight,
+                    buffered: state.gestureLogBuffer.length,
+                    controllerCleared: state.gestureLogAbortController === null,
+                  };
+                  state.token = realToken;
+                  window.fetch = realFetch;
+                  return report;
+                })()""",
+                await_promise=True,
+            )
+            assert clear_report == {
+                "flushStarted": True,
+                "requestAborted": True,
+                "generationAdvanced": True,
+                "inFlight": False,
+                "buffered": 0,
+                "controllerCleared": True,
+            }, clear_report
+
             gesture_report = browser.evaluate(
                 """(async () => {
                   const calls = [];
@@ -586,6 +786,7 @@ def main() -> None:
                   elements.touchLayer.releasePointerCapture = () => {};
                   elements.touchLayer.hasPointerCapture = () => false;
                   state.selectedWindow = { hwnd: 1 };
+                  setGestureArm('gestures');
                   localStorage.removeItem(CONTROL_MODE_STORAGE_KEY);
                   state.controlMode = 'trackpad';
                   loadViewerPreferences();
@@ -666,11 +867,12 @@ def main() -> None:
                   await new Promise(resolve => setTimeout(resolve, DOUBLE_TAP_DELAY_MS + 30));
                   const pendingTapCanceledByDragActions = calls.splice(0).map(item => item.action);
 
-                  setTapMode('double');
+                  setGestureArm('double');
                   e('pointerdown', 69, 120, 220);
                   e('pointerup', 69, 120, 220);
                   const explicitDoubleActions = calls.splice(0).map(item => item.action);
-                  const explicitDoubleModeAfterTap = state.tapMode;
+                  const explicitDoubleModeAfterTap = state.gestureArm;
+                  setGestureArm('gestures');
 
                   const cancellationActions = {};
                   e('pointerdown', 70, 120, 220);
@@ -734,6 +936,56 @@ def main() -> None:
                   e('pointerup', 12, 190, 270);
                   const scaleOneActions = calls.splice(0).map(item => item.action);
                   const scaleOneEndFocus = { ...state.cameraFocus };
+
+                  elements.touchLayer.setPointerCapture = () => { throw new DOMException('capture unavailable', 'NotFoundError'); };
+                  setGestureArm('scroll');
+                  e('pointerdown', 100, 120, 240);
+                  const captureFailureContinued = state.dragActive === true && state.pointerDown === true;
+                  e('pointerup', 100, 120, 240);
+                  const captureFailureLogged = state.gestureLogBuffer.some(entry => entry.event === 'pointer-capture'
+                    && entry.details.reason === 'capture-failed' && entry.details.state === 'continuing');
+                  elements.touchLayer.setPointerCapture = () => {};
+                  calls.splice(0);
+
+                  setGestureArm('scroll');
+                  e('pointerdown', 101, 120, 240);
+                  const shortcutScrollImmediate = state.dragActive === true && state.twoFingerGesture === null;
+                  e('pointerdown', 102, 180, 240);
+                  const shortcutScrollBlocksNormalGestures = state.twoFingerGesture === null && state.activePointers.size === 1;
+                  e('pointermove', 101, 120, 200);
+                  e('pointermove', 101, 120, 160);
+                  e('pointerup', 101, 120, 160);
+                  const shortcutScrollActions = calls.splice(0).map(item => item.action);
+
+                  setGestureArm('drag');
+                  e('pointerdown', 103, 120, 240);
+                  const shortcutDragImmediate = state.dragActive === true;
+                  e('pointermove', 103, 160, 200);
+                  e('pointerup', 103, 160, 200);
+                  const shortcutDragActions = calls.splice(0).map(item => item.action);
+
+                  setCameraScale(1);
+                  const shortcutPanStart = { ...state.cameraFocus };
+                  setGestureArm('pan');
+                  e('pointerdown', 104, 120, 240);
+                  const shortcutPanImmediate = state.dragActive === true;
+                  e('pointermove', 104, 170, 200);
+                  e('pointerup', 104, 170, 200);
+                  const shortcutPanMoved = state.cameraFocus.x !== shortcutPanStart.x || state.cameraFocus.y !== shortcutPanStart.y;
+                  const shortcutPanScale = state.cameraScale;
+                  calls.splice(0);
+
+                  setCameraScale(1);
+                  setGestureArm('zoom');
+                  e('pointerdown', 105, 120, 240);
+                  const shortcutZoomImmediate = state.dragActive === true;
+                  e('pointermove', 105, 120, 180);
+                  e('pointerup', 105, 120, 180);
+                  const shortcutZoomScale = state.cameraScale;
+                  calls.splice(0);
+                  const shortcutDiagnosticEntries = state.gestureLogBuffer
+                    .filter(entry => ['pointer-ready','shortcut-drag-frame','shortcut-drag-finish','pointer-capture'].includes(entry.event));
+                  setGestureArm('gestures');
 
                   e('pointerdown', 1, 100, 200);
                   e('pointerdown', 2, 180, 200);
@@ -822,7 +1074,7 @@ def main() -> None:
                   haptic = realHaptic;
                   state.selectedWindow = null;
                   resetViewer();
-                  return { freshControls, legacyControls, savedControls, trackpadActions, touchModeStored, singleTapImmediateActions, singleTapActions, doubleTapActions, doubleTapStatus, doubleTapHaptic, doubleTapDelayedActions, farTapImmediateActions, farTapDelayedActions, lateTapActions, pendingTapCanceledByDragActions, explicitDoubleActions, explicitDoubleModeAfterTap, cancellationActions, panActions, panStartFocus, panEndFocus, boundedPanActions, boundedPanFocus, scaleOneActions, scaleOneFocus, scaleOneEndFocus, prematureMode, prematureActions, earlyReleaseActions, jitterArmed, readyStatus, readyHaptic, scrollActions, scrollModeAfterDrag, scrollModeAfterSeparation, scrollScaleBeforeSeparation, scrollScaleAfterSeparation, scrollCancelActions, scrollCancelState, pinchActions, pinchScale, pinchModeAfterSeparation, pinchModeAfterParallel, twoFingerTapActions, twoFingerTapStatus, twoFingerTapHaptic, heldTwoFingerTapActions, heldFingerActions, heldThenReleasedActions, cancelActions, diagnosticEvents, diagnosticStates, diagnosticPointerTypes };
+                  return { freshControls, legacyControls, savedControls, trackpadActions, touchModeStored, singleTapImmediateActions, singleTapActions, doubleTapActions, doubleTapStatus, doubleTapHaptic, doubleTapDelayedActions, farTapImmediateActions, farTapDelayedActions, lateTapActions, pendingTapCanceledByDragActions, explicitDoubleActions, explicitDoubleModeAfterTap, cancellationActions, panActions, panStartFocus, panEndFocus, boundedPanActions, boundedPanFocus, scaleOneActions, scaleOneFocus, scaleOneEndFocus, captureFailureContinued, captureFailureLogged, shortcutScrollImmediate, shortcutScrollBlocksNormalGestures, shortcutScrollActions, shortcutDragImmediate, shortcutDragActions, shortcutPanImmediate, shortcutPanMoved, shortcutPanScale, shortcutZoomImmediate, shortcutZoomScale, shortcutDiagnosticEntries, prematureMode, prematureActions, earlyReleaseActions, jitterArmed, readyStatus, readyHaptic, scrollActions, scrollModeAfterDrag, scrollModeAfterSeparation, scrollScaleBeforeSeparation, scrollScaleAfterSeparation, scrollCancelActions, scrollCancelState, pinchActions, pinchScale, pinchModeAfterSeparation, pinchModeAfterParallel, twoFingerTapActions, twoFingerTapStatus, twoFingerTapHaptic, heldTwoFingerTapActions, heldFingerActions, heldThenReleasedActions, cancelActions, diagnosticEvents, diagnosticStates, diagnosticPointerTypes };
                 })()""",
                 await_promise=True,
             )
@@ -842,7 +1094,7 @@ def main() -> None:
             assert gesture_report["lateTapActions"] == ["touch_tap", "touch_tap"], gesture_report
             assert gesture_report["pendingTapCanceledByDragActions"] == [], gesture_report
             assert gesture_report["explicitDoubleActions"] == ["touch_double"], gesture_report
-            assert gesture_report["explicitDoubleModeAfterTap"] == "left", gesture_report
+            assert gesture_report["explicitDoubleModeAfterTap"] == "double", gesture_report
             assert all(actions == [] for actions in gesture_report["cancellationActions"].values()), gesture_report
             assert gesture_report["panActions"] == [], gesture_report
             assert gesture_report["panEndFocus"]["x"] < gesture_report["panStartFocus"]["x"], gesture_report
@@ -851,6 +1103,19 @@ def main() -> None:
             assert gesture_report["boundedPanFocus"] == {"x": 0, "y": 0}, gesture_report
             assert gesture_report["scaleOneActions"] == [], gesture_report
             assert gesture_report["scaleOneEndFocus"] == gesture_report["scaleOneFocus"], gesture_report
+            assert gesture_report["captureFailureContinued"] and gesture_report["captureFailureLogged"], gesture_report
+            assert gesture_report["shortcutScrollImmediate"] and gesture_report["shortcutScrollBlocksNormalGestures"], gesture_report
+            assert gesture_report["shortcutScrollActions"] == ["wheel_current", "wheel_current"], gesture_report
+            assert gesture_report["shortcutDragImmediate"], gesture_report
+            assert gesture_report["shortcutDragActions"] == ["down", "move", "up"], gesture_report
+            assert gesture_report["shortcutPanImmediate"] and gesture_report["shortcutPanMoved"] and gesture_report["shortcutPanScale"] >= 2, gesture_report
+            assert gesture_report["shortcutZoomImmediate"] and gesture_report["shortcutZoomScale"] > 1, gesture_report
+            shortcut_diagnostic_events = {entry["event"] for entry in gesture_report["shortcutDiagnosticEntries"]}
+            assert {"pointer-ready", "shortcut-drag-frame", "shortcut-drag-finish", "pointer-capture"} <= shortcut_diagnostic_events, gesture_report
+            assert all(
+                "shortcut" in entry["details"] and "pointer_type" in entry["details"]
+                for entry in gesture_report["shortcutDiagnosticEntries"]
+            ), gesture_report
             assert gesture_report["prematureMode"] is None and gesture_report["prematureActions"] == [], gesture_report
             assert gesture_report["earlyReleaseActions"] == [], gesture_report
             assert gesture_report["jitterArmed"] is True and gesture_report["readyStatus"] == "Scroll ready", gesture_report

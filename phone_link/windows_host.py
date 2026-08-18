@@ -550,6 +550,53 @@ def handle_pointer(
     *,
     gesture_id: str = "",
 ) -> None:
+    started_at = time.perf_counter()
+    log_gesture("win32-action-start", {"action": action, "state": "dispatch"})
+    try:
+        _handle_pointer_impl(
+            hwnd,
+            action,
+            x_ratio,
+            y_ratio,
+            delta,
+            delta_x,
+            delta_y,
+            gesture_id=gesture_id,
+        )
+    except Exception as error:
+        log_gesture(
+            "win32-action-error",
+            {
+                "action": action,
+                "duration_ms": (time.perf_counter() - started_at) * 1000,
+                "error_code": getattr(error, "winerror", None) or getattr(error, "errno", 0) or 0,
+                "error_type": type(error).__name__,
+                "result": "failed",
+            },
+            level="error",
+        )
+        raise
+    log_gesture(
+        "win32-action-result",
+        {
+            "action": action,
+            "duration_ms": (time.perf_counter() - started_at) * 1000,
+            "result": "ok",
+        },
+    )
+
+
+def _handle_pointer_impl(
+    hwnd: int,
+    action: str,
+    x_ratio: float,
+    y_ratio: float,
+    delta: int = 0,
+    delta_x: float = 0.0,
+    delta_y: float = 0.0,
+    *,
+    gesture_id: str = "",
+) -> None:
     if _is_fullscreen_target(hwnd):
         _handle_fullscreen_pointer(
             action, x_ratio, y_ratio, delta=delta, delta_x=delta_x, delta_y=delta_y, gesture_id=gesture_id
@@ -669,7 +716,7 @@ def _handle_fullscreen_pointer(
         win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0, wheel_amount, 0)
         return
 
-    if action in {"tap", "double", "right_tap", "down", "up", "wheel"}:
+    if action in {"tap", "double", "right_tap", "down", "up", "wheel", "move"}:
         _move_cursor_to_bounds_point(bounds, clamped_x, clamped_y)
 
     if action == "move":
@@ -1088,6 +1135,8 @@ def cancel_active_touch(*, gesture_id: str = "", reason: str = "recovery") -> bo
 def _inject_touch_contact(phase: str, screen_x: int, screen_y: int, *, gesture_id: str = "") -> None:
     global _touch_initialized, _touch_contact_active, _touch_contact_point, _touch_gesture_id
 
+    started_at = time.perf_counter()
+    log_gesture("win32-touch-frame-start", {"phase": phase, "state": "injecting"})
     with _touch_lock:
         if not _touch_initialized:
             if not initialize_touch_injection(1, TOUCH_FEEDBACK_DEFAULT):
@@ -1169,6 +1218,15 @@ def _inject_touch_contact(phase: str, screen_x: int, screen_y: int, *, gesture_i
             if settle_anchor is not None:
                 _start_touch_cursor_settle(settle_anchor)
             _schedule_touch_cursor_guard_stop()
+    log_gesture(
+        "win32-touch-frame-result",
+        {
+            "phase": phase,
+            "duration_ms": (time.perf_counter() - started_at) * 1000,
+            "state": "active" if _touch_contact_active else "idle",
+            "result": "ok",
+        },
+    )
 
 
 def _inject_touch_contact_unlocked(phase: str, screen_x: int, screen_y: int) -> None:

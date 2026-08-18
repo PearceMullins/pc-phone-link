@@ -81,6 +81,10 @@ class PointerRequest(BaseModel):
     control_mode: str = Field(default="unknown", max_length=20)
     pointer_count: int = Field(default=0, ge=0, le=10)
     pointer_type: str = Field(default="unknown", max_length=20)
+    shortcut: str = Field(default="gestures", max_length=20)
+    sequence: int = Field(default=0, ge=0)
+    coalesced_count: int = Field(default=1, ge=1, le=10000)
+    client_queued_at_ms: int = Field(default=0, ge=0)
 
 
 class TextRequest(BaseModel):
@@ -821,6 +825,10 @@ def _gesture_request_context(hwnd: int, payload: PointerRequest) -> dict[str, An
         "control_mode": payload.control_mode,
         "pointer_count": payload.pointer_count,
         "pointer_type": payload.pointer_type,
+        "shortcut": payload.shortcut,
+        "sequence": payload.sequence,
+        "coalesced_count": payload.coalesced_count,
+        "client_queued_at_ms": payload.client_queued_at_ms,
         "action": payload.action,
         "x": payload.x,
         "y": payload.y,

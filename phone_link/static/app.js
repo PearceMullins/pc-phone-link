@@ -15,6 +15,10 @@ const state = {
   gestureArm: "gestures",
   controlMode: "touch",
   gameInputStyle: "pad",
+  gameUiScale: 1,
+  gameLayout: null,
+  gameLayoutEditing: false,
+  gameLayoutDrag: null,
   gameHeldKeys: new Set(),
   gamePadPointers: new Map(),
   gameJoystickPointerId: null,
@@ -137,6 +141,8 @@ const PAIRING_DEVICE_NAME_STORAGE_KEY = "pc-phone-link-pairing-device-name";
 const FIT_SHAPE_STORAGE_KEY = "pc-phone-link-fit-shape";
 const CONTROL_MODE_STORAGE_KEY = "pc-phone-link-control-mode";
 const GAME_INPUT_STYLE_STORAGE_KEY = "pc-phone-link-game-input-style";
+const GAME_UI_SCALE_STORAGE_KEY = "pc-phone-link-game-ui-scale";
+const GAME_LAYOUT_STORAGE_KEY = "pc-phone-link-game-layout-v1";
 const POINTER_SHORTCUT_STORAGE_KEY = "pc-phone-link-pointer-shortcut";
 const BOTTOM_NAV_STORAGE_KEY = "pc-phone-link-bottom-nav";
 const GESTURE_DIAGNOSTICS_STORAGE_KEY = "pc-phone-link-gesture-diagnostics";
@@ -243,6 +249,14 @@ const elements = {
   gameControls: document.getElementById("gameControls"),
   gameInputStyle: document.getElementById("gameInputStyle"),
   gameInputStyleSetting: document.getElementById("gameInputStyleSetting"),
+  gameUiSize: document.getElementById("gameUiSize"),
+  gameUiSizeValue: document.getElementById("gameUiSizeValue"),
+  gameUiSizePreview: document.getElementById("gameUiSizePreview"),
+  resetGameUiSize: document.getElementById("resetGameUiSize"),
+  editGameLayout: document.getElementById("editGameLayout"),
+  resetGameLayout: document.getElementById("resetGameLayout"),
+  doneGameLayout: document.getElementById("doneGameLayout"),
+  resetGameLayoutOverlay: document.getElementById("resetGameLayoutOverlay"),
   gameJoystick: document.getElementById("gameJoystick"),
   gameJoystickKnob: document.getElementById("gameJoystickKnob"),
   gameMouseJoystick: document.getElementById("gameMouseJoystick"),
@@ -659,9 +673,13 @@ function syncControlMode() {
     elements.controlMode.value = state.controlMode;
   }
   if (elements.controlModeHelp) {
-    elements.controlModeHelp.textContent = state.controlMode === "touch"
-      ? "Tap to click, double-tap to right-click, quick two-finger tap to double-click, one finger to pan viewer, hold two fingers until Scroll ready then hold one finger and drag the other to scroll, and pinch to zoom."
-      : "Drag to move PC mouse, tap to click, and use Shortcuts for persistent scrolling, right-click, and other pointer modes.";
+    if (state.controlMode === "touch") {
+      elements.controlModeHelp.textContent = "Tap to click, double-tap to right-click, quick two-finger tap to double-click, one finger to pan viewer, hold two fingers until Scroll ready then hold one finger and drag the other to scroll, and pinch to zoom.";
+    } else if (state.controlMode === "trackpad") {
+      elements.controlModeHelp.textContent = "Drag to move PC mouse, tap to click, and use Shortcuts for persistent scrolling, right-click, and other pointer modes.";
+    } else {
+      elements.controlModeHelp.textContent = "Hold the bottom movement control to send W, A, S, and D. Multiple directions work together. Viewer pointer gestures pause while Game is active.";
+    }
   }
   elements.viewerShell.classList.toggle("direct-touch-active", state.controlMode === "touch");
   elements.viewerShell.classList.toggle("game-active", state.controlMode === "game");
@@ -675,6 +693,10 @@ function setControlMode(value) {
     releaseActiveTouches();
   }
   if (nextMode !== state.controlMode) releaseAllGameKeys("mode-change");
+  if (nextMode !== "game") {
+    state.gameLayoutEditing = false;
+    state.gameLayoutDrag = null;
+  }
   state.controlMode = nextMode;
   window.localStorage.setItem(CONTROL_MODE_STORAGE_KEY, state.controlMode);
   syncControlMode();
@@ -694,7 +716,188 @@ function setGameInputStyle(value) {
   });
 }
 
+function gameLayoutGroups() {
+  return [...document.querySelectorAll("[data-game-layout-group]")];
+}
+
+function currentGameLayoutOrientation() {
+  const width = elements.gameControls?.clientWidth || elements.viewerShell?.clientWidth || window.innerWidth;
+  const height = elements.gameControls?.clientHeight || elements.viewerShell?.clientHeight || window.innerHeight;
+  return width >= height ? "landscape" : "portrait";
+}
+
+function saveGameLayout() {
+  window.localStorage.setItem(GAME_LAYOUT_STORAGE_KEY, JSON.stringify(state.gameLayout));
+}
+
+function syncGameCustomizationControls() {
+  const percent = Math.round(state.gameUiScale * 100);
+  if (elements.gameUiSize) elements.gameUiSize.value = String(percent);
+  if (elements.gameUiSizeValue) elements.gameUiSizeValue.textContent = `${percent}%`;
+  if (elements.gameUiSizePreview) {
+    elements.gameUiSizePreview.style.setProperty("--game-ui-preview-scale", String(state.gameUiScale));
+  }
+  if (elements.editGameLayout) {
+    elements.editGameLayout.disabled = state.controlMode !== "game" || !state.selectedWindow || !usesMobileShell();
+    elements.editGameLayout.textContent = state.gameLayoutEditing ? "Editing layout" : "Edit layout";
+  }
+}
+
+function applyGameLayout({ persistClamp = false } = {}) {
+  if (!elements.gameControls || !state.gameLayout) return;
+  elements.gameControls.style.setProperty("--game-ui-scale", String(state.gameUiScale));
+  const width = elements.gameControls.clientWidth;
+  const height = elements.gameControls.clientHeight;
+  if (width <= 0 || height <= 0) return;
+
+  const orientation = currentGameLayoutOrientation();
+  let changed = false;
+  for (const group of gameLayoutGroups()) {
+    const name = group.dataset.gameLayoutGroup;
+    const position = state.gameLayout[orientation]?.[name];
+    if (!position) continue;
+    const halfWidth = Math.min((group.offsetWidth * state.gameUiScale) / 2, width / 2);
+    const halfHeight = Math.min((group.offsetHeight * state.gameUiScale) / 2, height / 2);
+    const edgeGap = 4;
+    const handleGap = state.gameLayoutEditing ? Math.min(40 * state.gameUiScale, height / 5) : 0;
+    const minX = Math.min(halfWidth + edgeGap, width / 2);
+    const maxX = Math.max(width - halfWidth - edgeGap, width / 2);
+    const minY = Math.min(halfHeight + edgeGap + handleGap, height / 2);
+    const maxY = Math.max(height - halfHeight - edgeGap, height / 2);
+    const x = Math.min(Math.max(position.x * width, minX), maxX);
+    const y = Math.min(Math.max(position.y * height, minY), maxY);
+    group.style.left = `${x}px`;
+    group.style.top = `${y}px`;
+    const nextX = x / width;
+    const nextY = y / height;
+    if (Math.abs(nextX - position.x) > 0.0001 || Math.abs(nextY - position.y) > 0.0001) {
+      state.gameLayout[orientation][name] = { x: nextX, y: nextY };
+      changed = true;
+    }
+  }
+  if (persistClamp && changed) saveGameLayout();
+}
+
+function setGameUiScale(value, { persist = true } = {}) {
+  state.gameUiScale = window.PCPhoneLinkGameControls.clampGameUiScale(value);
+  if (persist) window.localStorage.setItem(GAME_UI_SCALE_STORAGE_KEY, String(state.gameUiScale));
+  syncGameCustomizationControls();
+  applyGameLayout({ persistClamp: persist });
+  logGestureDiagnostic("game-ui-size", {
+    action: "resize",
+    x: state.gameUiScale,
+    reason: persist ? "selection" : "load",
+    state: "ready",
+  });
+}
+
+function resetGameUiSize() {
+  setGameUiScale(1);
+  showToast("Game UI size reset.");
+}
+
+function resetGameLayoutPositions() {
+  state.gameLayout = window.PCPhoneLinkGameControls.defaultGameLayout();
+  saveGameLayout();
+  applyGameLayout({ persistClamp: true });
+  logGestureDiagnostic("game-layout-reset", {
+    action: "reset",
+    mode: currentGameLayoutOrientation(),
+    state: state.gameLayoutEditing ? "editing" : "ready",
+  });
+  showToast("Game layout reset.");
+}
+
+function setGameLayoutEditing(editing, { openViewer = true } = {}) {
+  const next = Boolean(editing && state.controlMode === "game" && state.selectedWindow && usesMobileShell());
+  if (next === state.gameLayoutEditing) return;
+  releaseAllGameKeys(next ? "layout-edit-start" : "layout-edit-finish");
+  state.gameLayoutEditing = next;
+  state.gameLayoutDrag = null;
+  gameLayoutGroups().forEach((group) => group.classList.remove("dragging"));
+  if (next && openViewer) openDestination("viewer");
+  syncGameControlsUi();
+  logGestureDiagnostic("game-layout-edit", {
+    action: next ? "start" : "finish",
+    mode: currentGameLayoutOrientation(),
+    state: next ? "editing" : "ready",
+  });
+}
+
+function beginGameLayoutDrag(event) {
+  if (!state.gameLayoutEditing || !elements.gameControls) return;
+  const group = event.target.closest("[data-game-layout-group]");
+  if (!group || !elements.gameControls.contains(group)) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const groupRect = group.getBoundingClientRect();
+  state.gameLayoutDrag = {
+    pointerId: event.pointerId,
+    group: group.dataset.gameLayoutGroup,
+    offsetX: event.clientX - (groupRect.left + groupRect.width / 2),
+    offsetY: event.clientY - (groupRect.top + groupRect.height / 2),
+  };
+  group.classList.add("dragging");
+  try { group.setPointerCapture(event.pointerId); } catch { /* window fallback completes drag */ }
+}
+
+function moveGameLayoutDrag(event) {
+  const drag = state.gameLayoutDrag;
+  if (!state.gameLayoutEditing || !drag || drag.pointerId !== event.pointerId || !elements.gameControls) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const bounds = elements.gameControls.getBoundingClientRect();
+  if (bounds.width <= 0 || bounds.height <= 0) return;
+  const orientation = currentGameLayoutOrientation();
+  state.gameLayout[orientation][drag.group] = {
+    x: (event.clientX - drag.offsetX - bounds.left) / bounds.width,
+    y: (event.clientY - drag.offsetY - bounds.top) / bounds.height,
+  };
+  applyGameLayout();
+}
+
+function finishGameLayoutDrag(event) {
+  const drag = state.gameLayoutDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  event.preventDefault?.();
+  event.stopImmediatePropagation?.();
+  document.querySelector(`[data-game-layout-group="${drag.group}"]`)?.classList.remove("dragging");
+  state.gameLayoutDrag = null;
+  applyGameLayout({ persistClamp: true });
+  saveGameLayout();
+  logGestureDiagnostic("game-layout-move", {
+    action: "move",
+    mode: currentGameLayoutOrientation(),
+    target: drag.group,
+    reason: event.type || "pointer-up",
+    state: "placed",
+  });
+}
+
+function nudgeGameLayoutGroup(event) {
+  if (!state.gameLayoutEditing || !event.target.matches(".game-layout-handle")) return;
+  const delta = event.shiftKey ? 0.05 : 0.015;
+  const changes = {
+    ArrowLeft: [-delta, 0], ArrowRight: [delta, 0],
+    ArrowUp: [0, -delta], ArrowDown: [0, delta],
+  };
+  const change = changes[event.key];
+  if (!change) return;
+  event.preventDefault();
+  const group = event.target.closest("[data-game-layout-group]")?.dataset.gameLayoutGroup;
+  if (!group) return;
+  const orientation = currentGameLayoutOrientation();
+  const position = state.gameLayout[orientation][group];
+  state.gameLayout[orientation][group] = { x: position.x + change[0], y: position.y + change[1] };
+  applyGameLayout({ persistClamp: true });
+  saveGameLayout();
+}
+
 function syncGameControlsUi() {
+  if (state.gameLayoutEditing && (state.controlMode !== "game" || !state.selectedWindow || !usesMobileShell())) {
+    state.gameLayoutEditing = false;
+    state.gameLayoutDrag = null;
+  }
   if (elements.gameInputStyle) elements.gameInputStyle.value = state.gameInputStyle;
   elements.gameInputStyleSetting?.classList.toggle("hidden", state.controlMode !== "game");
   const visible = state.controlMode === "game"
@@ -706,11 +909,14 @@ function syncGameControlsUi() {
     releaseAllGameKeys("layout-hidden");
   }
   elements.gameControls?.classList.toggle("hidden", !visible);
+  elements.gameControls?.classList.toggle("editing", visible && state.gameLayoutEditing);
   elements.gameControls?.setAttribute("aria-hidden", String(!visible));
   elements.gamePad?.classList.toggle("hidden", state.gameInputStyle !== "pad");
   elements.gameJoystick?.classList.toggle("hidden", state.gameInputStyle !== "joystick");
   syncGameHeldUi();
   resetGameMouseUi();
+  syncGameCustomizationControls();
+  applyGameLayout({ persistClamp: true });
 }
 
 function clampStreamFps(value) {
@@ -1331,6 +1537,16 @@ function loadViewerPreferences() {
   state.gameInputStyle = window.PCPhoneLinkGameControls.normalizeInputStyle(
     window.localStorage.getItem(GAME_INPUT_STYLE_STORAGE_KEY),
   );
+  state.gameUiScale = window.PCPhoneLinkGameControls.clampGameUiScale(
+    window.localStorage.getItem(GAME_UI_SCALE_STORAGE_KEY),
+  );
+  try {
+    state.gameLayout = window.PCPhoneLinkGameControls.normalizeGameLayout(
+      JSON.parse(window.localStorage.getItem(GAME_LAYOUT_STORAGE_KEY) || "null"),
+    );
+  } catch {
+    state.gameLayout = window.PCPhoneLinkGameControls.defaultGameLayout();
+  }
   state.gestureDiagnosticsEnabled = window.localStorage.getItem(GESTURE_DIAGNOSTICS_STORAGE_KEY) !== "false";
   state.gestureSessionId = diagnosticId("session");
   const savedStreamFps = Number.parseInt(window.localStorage.getItem(STREAM_FPS_STORAGE_KEY) || "", 10);
@@ -4302,6 +4518,7 @@ async function sendSpecialKey(key) {
 
 function gameControlsActive() {
   return state.controlMode === "game"
+    && !state.gameLayoutEditing
     && state.currentDestination === "viewer"
     && Boolean(state.selectedWindow);
 }
@@ -4914,6 +5131,11 @@ function openDestination(destination, { toggle = false } = {}) {
   cancelPendingTap("navigation");
   const next = toggle && state.currentDestination === destination ? "viewer" : destination;
   if (next !== state.currentDestination) releaseAllGameKeys("destination-change");
+  if (next !== "viewer" && state.gameLayoutEditing) {
+    state.gameLayoutEditing = false;
+    state.gameLayoutDrag = null;
+    gameLayoutGroups().forEach((group) => group.classList.remove("dragging"));
+  }
   if (next === "viewer" && state.currentDestination !== "viewer"
     && (state.pointerDown || state.activePointers.size || state.twoFingerGesture)) {
     releaseActiveTouches();
@@ -5076,6 +5298,19 @@ if (elements.controlMode) {
 if (elements.gameInputStyle) {
   elements.gameInputStyle.addEventListener("change", (event) => setGameInputStyle(event.target.value));
 }
+elements.gameUiSize?.addEventListener("input", (event) => setGameUiScale(Number(event.target.value) / 100));
+elements.gameUiSize?.addEventListener("change", (event) => setGameUiScale(Number(event.target.value) / 100));
+elements.resetGameUiSize?.addEventListener("click", resetGameUiSize);
+elements.editGameLayout?.addEventListener("click", () => {
+  if (!state.selectedWindow) {
+    showToast("Choose a PC window before editing Game layout.");
+    return;
+  }
+  setGameLayoutEditing(true);
+});
+elements.doneGameLayout?.addEventListener("click", () => setGameLayoutEditing(false));
+elements.resetGameLayout?.addEventListener("click", resetGameLayoutPositions);
+elements.resetGameLayoutOverlay?.addEventListener("click", resetGameLayoutPositions);
 if (elements.followMouse) {
   elements.followMouse.addEventListener("change", (event) => {
     state.followMouse = event.target.checked;
@@ -5138,6 +5373,12 @@ elements.touchLayer.addEventListener("pointermove", handlePointerMove, { passive
 elements.touchLayer.addEventListener("pointerup", handlePointerUp, { passive: false });
 elements.touchLayer.addEventListener("pointercancel", handlePointerCancel, { passive: false });
 elements.touchLayer.addEventListener("contextmenu", (event) => event.preventDefault());
+elements.gameControls?.addEventListener("pointerdown", beginGameLayoutDrag, { capture: true, passive: false });
+elements.gameControls?.addEventListener("pointermove", moveGameLayoutDrag, { capture: true, passive: false });
+elements.gameControls?.addEventListener("pointerup", finishGameLayoutDrag, { capture: true, passive: false });
+elements.gameControls?.addEventListener("pointercancel", finishGameLayoutDrag, { capture: true, passive: false });
+elements.gameControls?.addEventListener("lostpointercapture", finishGameLayoutDrag, { capture: true, passive: false });
+elements.gameControls?.addEventListener("keydown", nudgeGameLayoutGroup);
 document.querySelectorAll("[data-game-key]").forEach((button) => {
   button.addEventListener("pointerdown", beginGamePadPointer, { passive: false });
   button.addEventListener("pointerup", (event) => finishGamePointer(event, "pointer-up"), { passive: false });
@@ -5165,11 +5406,13 @@ document.querySelectorAll("[data-game-mouse-button]").forEach((button) => {
   button.addEventListener("contextmenu", (event) => event.preventDefault());
 });
 window.addEventListener("pointerup", (event) => {
+  finishGameLayoutDrag(event);
   finishGamePointer(event, "window-pointer-up");
   finishGameMouseJoystick(event, "window-pointer-up");
   finishGameMouseClick(event, "window-pointer-up", { activate: true });
 }, { passive: false });
 window.addEventListener("pointercancel", (event) => {
+  finishGameLayoutDrag(event);
   finishGamePointer(event, "window-pointer-cancel");
   finishGameMouseJoystick(event, "window-pointer-cancel");
   finishGameMouseClick(event, "window-pointer-cancel");

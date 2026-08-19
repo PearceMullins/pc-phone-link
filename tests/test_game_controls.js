@@ -20,5 +20,24 @@ assert.ok(mouseDiagonal.magnitude > 0.99);
 const mousePartial = game.mouseVectorForJoystick(0.5, 0);
 assert.ok(mousePartial.x > 0 && mousePartial.x < 0.5);
 assert.equal(mousePartial.y, 0);
+assert.equal(game.clampGameUiScale(null), 1);
+assert.equal(game.clampGameUiScale(0.2), 0.75);
+assert.equal(game.clampGameUiScale(2), 1.35);
+assert.equal(game.clampGameUiScale("1.15"), 1.15);
+const defaults = game.defaultGameLayout();
+assert.notEqual(defaults, game.defaultGameLayout());
+assert.deepEqual(Object.keys(defaults), ["portrait", "landscape"]);
+assert.deepEqual(Object.keys(defaults.portrait), ["movement", "mouse", "clicks"]);
+const normalizedLayout = game.normalizeGameLayout({
+  portrait: {
+    movement: { x: -1, y: 2 },
+    mouse: { x: "0.42", y: 0.33 },
+  },
+  landscape: { clicks: { x: Number.NaN, y: 0.4 } },
+});
+assert.deepEqual(normalizedLayout.portrait.movement, { x: 0, y: 1 });
+assert.deepEqual(normalizedLayout.portrait.mouse, { x: 0.42, y: 0.33 });
+assert.deepEqual(normalizedLayout.portrait.clicks, defaults.portrait.clicks);
+assert.deepEqual(normalizedLayout.landscape.clicks, { x: defaults.landscape.clicks.x, y: 0.4 });
 
 console.log("game controls tests passed");

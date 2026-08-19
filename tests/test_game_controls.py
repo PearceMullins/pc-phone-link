@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest import mock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from phone_link import app as app_module
@@ -22,7 +23,7 @@ def test_game_key_hold_supports_diagonals_and_shared_owners() -> None:
     _reset_game_state()
     emitted: list[tuple[int, bool]] = []
     with (
-        mock.patch.object(windows_host, "focus_window") as focus,
+        mock.patch.object(windows_host, "_prepare_game_input_target") as prepare_target,
         mock.patch.object(windows_host, "_renew_game_key_lease_locked"),
         mock.patch.object(
             windows_host,
@@ -44,15 +45,78 @@ def test_game_key_hold_supports_diagonals_and_shared_owners() -> None:
         (windows_host.GAME_MOVEMENT_KEYS["d"], False),
         (windows_host.GAME_MOVEMENT_KEYS["w"], False),
     ]
-    assert focus.call_count == 3
+    assert prepare_target.call_args_list == [
+        mock.call(55, "session-one"),
+        mock.call(55, "session-two"),
+    ]
     _reset_game_state()
+
+
+def test_game_key_uses_scan_code_send_input_for_unity_compatible_holds() -> None:
+    scan_code = 0x11
+    with (
+        mock.patch.object(windows_host.win32api, "MapVirtualKey", return_value=scan_code) as map_virtual_key,
+        mock.patch.object(windows_host, "_send_inputs") as send_inputs,
+        mock.patch.object(windows_host.win32api, "keybd_event") as legacy_key_event,
+    ):
+        windows_host._emit_game_key(windows_host.GAME_MOVEMENT_KEYS["w"], down=True)
+        windows_host._emit_game_key(windows_host.GAME_MOVEMENT_KEYS["w"], down=False)
+
+    map_virtual_key.assert_has_calls([
+        mock.call(windows_host.GAME_MOVEMENT_KEYS["w"], windows_host.MAPVK_VK_TO_VSC),
+        mock.call(windows_host.GAME_MOVEMENT_KEYS["w"], windows_host.MAPVK_VK_TO_VSC),
+    ])
+    assert send_inputs.call_count == 2
+    down_input = send_inputs.call_args_list[0].args[0][0]
+    up_input = send_inputs.call_args_list[1].args[0][0]
+    assert (down_input.type, down_input.ki.wVk, down_input.ki.wScan, down_input.ki.dwFlags) == (
+        windows_host.INPUT_KEYBOARD,
+        0,
+        scan_code,
+        windows_host.KEYEVENTF_SCANCODE,
+    )
+    assert (up_input.type, up_input.ki.wVk, up_input.ki.wScan, up_input.ki.dwFlags) == (
+        windows_host.INPUT_KEYBOARD,
+        0,
+        scan_code,
+        windows_host.KEYEVENTF_SCANCODE | windows_host.KEYEVENTF_KEYUP,
+    )
+    legacy_key_event.assert_not_called()
+
+
+def test_game_target_activates_unity_game_view_only_when_focus_is_missing() -> None:
+    with (
+        mock.patch.object(windows_host, "_ensure_window", return_value=55),
+        mock.patch.object(windows_host, "_game_view_child", return_value=77),
+        mock.patch.object(windows_host, "_thread_focus", side_effect=[66, 77, 77]),
+        mock.patch.object(windows_host.win32gui, "GetForegroundWindow", side_effect=[99, 55, 55]),
+        mock.patch.object(windows_host, "_activate_game_input_target") as activate_target,
+        mock.patch.object(windows_host, "log_gesture"),
+    ):
+        windows_host._prepare_game_input_target(55, "unity-session")
+        windows_host._prepare_game_input_target(55, "unity-session")
+
+    activate_target.assert_called_once_with(55, 77)
+
+
+def test_game_target_rejects_unfocused_unity_game_view() -> None:
+    with (
+        mock.patch.object(windows_host, "_ensure_window", return_value=55),
+        mock.patch.object(windows_host, "_game_view_child", return_value=77),
+        mock.patch.object(windows_host, "_thread_focus", side_effect=[66, 66]),
+        mock.patch.object(windows_host.win32gui, "GetForegroundWindow", side_effect=[99, 55]),
+        mock.patch.object(windows_host, "_activate_game_input_target"),
+        mock.patch.object(windows_host, "log_gesture"),
+    ):
+        with pytest.raises(RuntimeError, match="could not focus"):
+            windows_host._prepare_game_input_target(55, "unity-session")
 
 
 def test_game_key_lease_releases_abandoned_key() -> None:
     _reset_game_state()
     emitted: list[tuple[int, bool]] = []
     with (
-        mock.patch.object(windows_host, "focus_window"),
+        mock.patch.object(windows_host, "_prepare_game_input_target"),
         mock.patch.object(windows_host, "_renew_game_key_lease_locked"),
         mock.patch.object(
             windows_host,

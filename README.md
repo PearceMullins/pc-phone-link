@@ -33,7 +33,7 @@ Stream individual windows or your full desktop, send touch and keyboard input, m
 ## Features
 
 - **Window streaming** — Capture a single app window or fullscreen desktop with adaptive WebSocket streaming and MJPEG fallback
-- **Phone controls** — App touch, Mouse trackpad, viewer pan, hold-to-arm one-finger-drag scroll, keyboard, special keys, and text input
+- **Phone controls** — App touch, Mouse trackpad, persistent Game movement controls, viewer pan, hold-to-arm one-finger-drag scroll, keyboard, special keys, and text input
 - **Window management** — List, focus, maximize, restore, and Phone Fit resize
 - **Connect code pairing** — Desktop GUI and phone show the same 4-digit code; tap Connect after confirming they match; remove connected phones from the PC window
 - **Power actions** — Lock, sleep, restart, shutdown from Settings on phone and iPad; desktop Power remains available
@@ -166,7 +166,7 @@ Phones and iPads default to Full screen, Windows, Keyboard, Shortcuts, Controls,
 | **Mouse trackpad** | Drag moves PC mouse; tap clicks; speed and follow-mouse settings remain configurable |
 | **Game** | Choose a multi-touch WASD pad or circular movement joystick. A separate right-side mouse joystick moves the PC cursor continuously with dead-zone and speed scaling; nearby Left, Middle, and Right buttons click without holding a native mouse button. Movement and mouse controls work together, including diagonals, and stop automatically on touch, focus, connection, target, or mode loss |
 
-Game control style and pad/joystick choice persist on each phone. Both layouts keep the mouse stick and click buttons under the right thumb. A short host-side lease also releases movement keys if browser cleanup cannot arrive after an abrupt disconnect; mouse movement is request-based and stops immediately when its stick returns neutral or its pointer lifecycle ends.
+Game control style and pad/joystick choice persist on each phone. Controls also provides a 75–135% Game UI size slider with live preview, plus Edit layout for independently placing movement, mouse-stick, and click-button groups. Portrait and landscape positions persist separately, clamp inside the safe viewer after resize or rotation, and reset to reachable defaults. Edit mode outlines each group, supports drag or keyboard-arrow placement, and suppresses all remote game input until Done. For a selected Unity Editor window, first movement press activates its Game view and sends held W/A/S/D as physical scan-code input; additional diagonal keys do not repeat focus work. A short host-side lease also releases movement keys if browser cleanup cannot arrive after an abrupt disconnect; mouse movement is request-based and stops immediately when its stick returns neutral or its pointer lifecycle ends.
 
 ### Keyboard and streaming
 

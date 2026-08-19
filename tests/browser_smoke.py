@@ -149,7 +149,7 @@ def main() -> None:
                             panelRight: visible?.right ?? innerWidth,
                             panelOverflow: panel ? panel.scrollWidth - panel.clientWidth : 0,
                             keyboardOpen: !elements.keyboardPanel.classList.contains('hidden'),
-                            controls: ['bottomNavEditor','bottomNavAdd','bottomNavReset','clickMode','rightClickMode','doubleClickMode','panMode','dragMode','scrollMode','zoomMode','scrollUp','scrollDown','focusWindow','maximizeWindow','restoreWindow','shortcutsPanel','shortcutMenu','activeShortcut','fitShape','streamFps','streamWidth','textScale','refreshTrustedDevices','voiceInput','powerToggle','fitToggle','toggleKeyboard','toggleControls'].every(id => document.getElementById(id)) && document.querySelectorAll('[data-special-key]').length === 8 && document.querySelectorAll('[data-pointer-shortcut]').length === 8,
+                            controls: ['bottomNavEditor','bottomNavAdd','bottomNavReset','clickMode','rightClickMode','doubleClickMode','panMode','dragMode','scrollMode','zoomMode','scrollUp','scrollDown','focusWindow','maximizeWindow','restoreWindow','shortcutsPanel','shortcutMenu','activeShortcut','fitShape','streamFps','streamWidth','textScale','refreshTrustedDevices','voiceInput','powerToggle','fitToggle','toggleKeyboard','toggleControls','gameControls','gameInputStyle','gameUiSize','gameUiSizeValue','gameUiSizePreview','editGameLayout','resetGameLayout','doneGameLayout','resetGameLayoutOverlay','gamePad','gameJoystick','gameMouseJoystick','gameMouseJoystickKnob'].every(id => document.getElementById(id)) && document.querySelectorAll('[data-game-layout-group]').length === 3 && document.querySelectorAll('[data-game-mouse-button]').length === 3 && document.querySelectorAll('[data-special-key]').length === 8 && document.querySelectorAll('[data-pointer-shortcut]').length === 8 && Array.from(elements.controlMode.options).some(option => option.value === 'game'),
                             shortcutBottom: {destination!r} === 'shortcuts' ? elements.shortcutMenu.lastElementChild.getBoundingClientRect().bottom : 0,
                             bottomActions: Array.from(elements.mobileNav.querySelectorAll('[data-bottom-action]')).map(button => button.dataset.bottomAction),
                             mandatoryEnabled: ['shortcuts','controls','settings'].every(id => !elements.mobileNav.querySelector(`[data-bottom-action="${id}"]`)?.disabled),
@@ -185,14 +185,29 @@ def main() -> None:
                       const viewer = elements.viewerShell.getBoundingClientRect();
                       const controls = elements.gameControls.getBoundingClientRect();
                       const movement = document.querySelector('.game-movement-control').getBoundingClientRect();
-                      const mouse = document.querySelector('.game-mouse-control').getBoundingClientRect();
+                      const mouse = document.querySelector('.game-mouse-stick-control').getBoundingClientRect();
+                      const clicks = document.querySelector('.game-mouse-buttons-control').getBoundingClientRect();
                       const mouseStick = elements.gameMouseJoystick.getBoundingClientRect();
                       const minButton = Math.min(...Array.from(document.querySelectorAll('[data-game-mouse-button]'), button => button.getBoundingClientRect().height));
+                      const savedScale = state.gameUiScale;
+                      const savedLayout = JSON.parse(JSON.stringify(state.gameLayout));
+                      state.gameUiScale = 1.35;
+                      applyGameLayout();
+                      const maxScaleReachable = [...document.querySelectorAll('[data-game-layout-group]')].every(group => {
+                        const rect = group.getBoundingClientRect();
+                        return rect.left >= viewer.left - 1 && rect.right <= viewer.right + 1
+                          && rect.top >= viewer.top - 1 && rect.bottom <= viewer.bottom + 1;
+                      });
+                      state.gameUiScale = savedScale;
+                      state.gameLayout = savedLayout;
+                      applyGameLayout();
                       const result = {
                         visible: !elements.gameControls.classList.contains('hidden'),
                         left: controls.left, right: controls.right, bottom: controls.bottom,
                         viewerLeft: viewer.left, viewerRight: viewer.right, viewerBottom: viewer.bottom,
-                        separated: movement.right <= mouse.left + 1,
+                        separated: movement.right <= mouse.left + 1 && movement.right <= clicks.left + 1,
+                        groupsReachable: [movement, mouse, clicks].every(group => group.left >= viewer.left - 1 && group.right <= viewer.right + 1 && group.top >= viewer.top - 1 && group.bottom <= viewer.bottom + 1),
+                        maxScaleReachable,
                         mouseStickWidth: mouseStick.width,
                         minButton,
                         overflow: elements.viewerShell.scrollWidth - elements.viewerShell.clientWidth,
@@ -207,7 +222,7 @@ def main() -> None:
                 assert game_responsive["left"] >= game_responsive["viewerLeft"] - 1, game_responsive
                 assert game_responsive["right"] <= game_responsive["viewerRight"] + 1, game_responsive
                 assert game_responsive["bottom"] <= game_responsive["viewerBottom"] + 1, game_responsive
-                assert game_responsive["separated"] and game_responsive["overflow"] <= 1, game_responsive
+                assert game_responsive["separated"] and game_responsive["groupsReachable"] and game_responsive["maxScaleReachable"] and game_responsive["overflow"] <= 1, game_responsive
                 assert game_responsive["mouseStickWidth"] >= 95 and game_responsive["minButton"] >= 36, game_responsive
                 power_report = browser.evaluate(
                     """(async () => {
@@ -606,6 +621,165 @@ def main() -> None:
             assert game_report["persisted"] == {
                 "mode": "game", "style": "joystick", "selectMode": "game", "selectStyle": "joystick",
             }, game_report
+
+            game_layout_edit = browser.evaluate(
+                """(async () => {
+                  window.__layoutRealApiFetch = apiFetch;
+                  window.__layoutRealRefreshStream = refreshStream;
+                  window.__layoutOldToken = state.token;
+                  const calls = [];
+                  apiFetch = async (path, options = {}) => {
+                    if (path.includes('/game-key') || path.includes('/pointer')) calls.push({ path, body: options.body });
+                    return { ok: true, applied: true, cursor: { x: 0.5, y: 0.5, visible: true } };
+                  };
+                  state.token = 'layout-test-token';
+                  state.gestureSessionId = 'layout-test-session';
+                  refreshStream = () => {};
+                  closeStreamSocket();
+                  localStorage.removeItem(GAME_UI_SCALE_STORAGE_KEY);
+                  localStorage.removeItem(GAME_LAYOUT_STORAGE_KEY);
+                  state.gameLayout = window.PCPhoneLinkGameControls.defaultGameLayout();
+                  setGameUiScale(1);
+                  updateSelectedWindow({ hwnd: 446, bounds: { width: 1280, height: 720 } });
+                  openDestination('viewer');
+                  setGameInputStyle('joystick');
+                  setControlMode('game');
+                  syncGameControlsUi();
+                  const movement = document.querySelector('[data-game-layout-group="movement"]');
+                  const handle = movement.querySelector('.game-layout-handle');
+                  movement.setPointerCapture = () => {};
+                  const initialWidth = movement.getBoundingClientRect().width;
+
+                  elements.gameUiSize.value = '125';
+                  elements.gameUiSize.dispatchEvent(new Event('input', { bubbles: true }));
+                  const scaledWidth = movement.getBoundingClientRect().width;
+                  const scaleStored = Number(localStorage.getItem(GAME_UI_SCALE_STORAGE_KEY));
+                  const previewScale = elements.gameUiSizePreview.style.getPropertyValue('--game-ui-preview-scale');
+
+                  setGameLayoutEditing(true, { openViewer: false });
+                  const fire = (target, type, id, x, y) => target.dispatchEvent(new PointerEvent(type, {
+                    pointerId: id, clientX: x, clientY: y, pointerType: 'touch', bubbles: true, cancelable: true,
+                  }));
+                  let rect = movement.getBoundingClientRect();
+                  fire(handle, 'pointerdown', 701, rect.left + rect.width / 2, rect.top + 4);
+                  fire(handle, 'pointermove', 701, -500, -500);
+                  fire(handle, 'pointerup', 701, -500, -500);
+                  rect = movement.getBoundingClientRect();
+                  const container = elements.gameControls.getBoundingClientRect();
+                  const clamped = rect.left >= container.left - 1 && rect.top >= container.top - 1
+                    && rect.right <= container.right + 1 && rect.bottom <= container.bottom + 1;
+                  const persistedMove = JSON.parse(localStorage.getItem(GAME_LAYOUT_STORAGE_KEY)).portrait.movement;
+
+                  const w = document.querySelector('[data-game-key="w"]');
+                  const wRect = w.getBoundingClientRect();
+                  fire(w, 'pointerdown', 702, wRect.left + wRect.width / 2, wRect.top + wRect.height / 2);
+                  fire(w, 'pointerup', 702, wRect.left + wRect.width / 2, wRect.top + wRect.height / 2);
+                  await new Promise(resolve => setTimeout(resolve, 0));
+                  const inputSuppressed = calls.length === 0 && state.gameHeldKeys.size === 0;
+                  const handlesVisible = [...document.querySelectorAll('.game-layout-handle')]
+                    .every(item => getComputedStyle(item).display !== 'none');
+
+                  state.gameLayout.portrait = {
+                    movement: { x: 0, y: 0 }, mouse: { x: 1, y: 0 }, clicks: { x: 1, y: 1 },
+                  };
+                  state.gameLayout.landscape = {
+                    movement: { x: 0, y: 1 }, mouse: { x: 1, y: 0 }, clicks: { x: 1, y: 1 },
+                  };
+                  saveGameLayout();
+                  applyGameLayout({ persistClamp: true });
+                  return {
+                    initialWidth, scaledWidth, scaleStored, previewScale,
+                    value: elements.gameUiSizeValue.textContent,
+                    editing: state.gameLayoutEditing,
+                    handlesVisible, clamped, persistedMove, inputSuppressed,
+                    orientation: currentGameLayoutOrientation(),
+                    storedHasBoth: ['portrait', 'landscape'].every(key => Boolean(JSON.parse(localStorage.getItem(GAME_LAYOUT_STORAGE_KEY))[key])),
+                  };
+                })()""",
+                await_promise=True,
+            )
+            assert game_layout_edit["scaledWidth"] > game_layout_edit["initialWidth"] * 1.2, game_layout_edit
+            assert game_layout_edit["scaleStored"] == 1.25 and game_layout_edit["previewScale"] == "1.25", game_layout_edit
+            assert game_layout_edit["value"] == "125%" and game_layout_edit["editing"], game_layout_edit
+            assert game_layout_edit["handlesVisible"] and game_layout_edit["clamped"] and game_layout_edit["inputSuppressed"], game_layout_edit
+            assert game_layout_edit["storedHasBoth"] and game_layout_edit["orientation"] == "portrait", game_layout_edit
+            assert 0 <= game_layout_edit["persistedMove"]["x"] <= 1 and 0 <= game_layout_edit["persistedMove"]["y"] <= 1, game_layout_edit
+
+            browser.call(
+                "Emulation.setDeviceMetricsOverride",
+                {"width": 640, "height": 360, "deviceScaleFactor": 2, "mobile": True},
+            )
+            time.sleep(0.1)
+            rotated_game_layout = browser.evaluate(
+                """(() => {
+                  syncViewportLayout();
+                  syncGameControlsUi();
+                  const container = elements.gameControls.getBoundingClientRect();
+                  const groups = [...document.querySelectorAll('[data-game-layout-group]')].map(group => {
+                    const rect = group.getBoundingClientRect();
+                    return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+                  });
+                  return {
+                    orientation: currentGameLayoutOrientation(),
+                    reachable: groups.every(rect => rect.left >= container.left - 1 && rect.top >= container.top - 1
+                      && rect.right <= container.right + 1 && rect.bottom <= container.bottom + 1),
+                    groups,
+                  };
+                })()"""
+            )
+            assert rotated_game_layout["orientation"] == "landscape" and rotated_game_layout["reachable"], rotated_game_layout
+
+            browser.call(
+                "Emulation.setDeviceMetricsOverride",
+                {"width": 390, "height": 844, "deviceScaleFactor": 2, "mobile": True},
+            )
+            time.sleep(0.1)
+            game_layout_reset = browser.evaluate(
+                """(async () => {
+                  syncViewportLayout();
+                  syncGameControlsUi();
+                  elements.resetGameUiSize.click();
+                  elements.resetGameLayoutOverlay.click();
+                  elements.doneGameLayout.click();
+                  const fire = (target, type, id, x, y) => target.dispatchEvent(new PointerEvent(type, {
+                    pointerId: id, clientX: x, clientY: y, pointerType: 'touch', bubbles: true, cancelable: true,
+                  }));
+                  const movementRect = elements.gameJoystick.getBoundingClientRect();
+                  const mouseRect = elements.gameMouseJoystick.getBoundingClientRect();
+                  fire(elements.gameJoystick, 'pointerdown', 711,
+                    movementRect.left + movementRect.width * 0.82, movementRect.top + movementRect.height * 0.18);
+                  fire(elements.gameMouseJoystick, 'pointerdown', 712,
+                    mouseRect.left + mouseRect.width * 0.18, mouseRect.top + mouseRect.height * 0.82);
+                  const simultaneousAfterEdit = state.gameHeldKeys.has('w') && state.gameHeldKeys.has('d')
+                    && state.gameMousePointerId === 712 && state.gameMouseVector.x < 0 && state.gameMouseVector.y > 0;
+                  fire(elements.gameMouseJoystick, 'pointercancel', 712, mouseRect.left, mouseRect.top);
+                  fire(elements.gameJoystick, 'pointercancel', 711, movementRect.left, movementRect.top);
+                  await state.gameKeyQueue.catch(() => null);
+                  const defaults = window.PCPhoneLinkGameControls.defaultGameLayout();
+                  const stored = JSON.parse(localStorage.getItem(GAME_LAYOUT_STORAGE_KEY));
+                  const result = {
+                    layoutReset: JSON.stringify(stored) === JSON.stringify(defaults),
+                    sizeReset: state.gameUiScale === 1 && elements.gameUiSizeValue.textContent === '100%',
+                    editFinished: !state.gameLayoutEditing && !elements.gameControls.classList.contains('editing'),
+                    simultaneousAfterEdit,
+                    releasedAfterEdit: state.gameHeldKeys.size === 0 && state.gameMousePointerId === null,
+                  };
+                  setControlMode('touch');
+                  state.selectedWindow = null;
+                  resetViewer();
+                  apiFetch = window.__layoutRealApiFetch;
+                  refreshStream = window.__layoutRealRefreshStream;
+                  state.token = window.__layoutOldToken;
+                  delete window.__layoutRealApiFetch;
+                  delete window.__layoutRealRefreshStream;
+                  delete window.__layoutOldToken;
+                  localStorage.removeItem(GAME_UI_SCALE_STORAGE_KEY);
+                  localStorage.removeItem(GAME_LAYOUT_STORAGE_KEY);
+                  return result;
+                })()""",
+                await_promise=True,
+            )
+            assert all(game_layout_reset.values()), game_layout_reset
 
             browser.evaluate(
                 """(() => {

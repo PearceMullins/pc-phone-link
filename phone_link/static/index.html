@@ -10,7 +10,7 @@
   <title>PC Phone Link</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="/assets/styles.css?v=20260818e">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260819f">
 </head>
 <body>
   <div id="app">
@@ -32,6 +32,11 @@
           <label class="setting-label" for="gameInputStyle"><span>Movement control</span></label>
           <select id="gameInputStyle" class="setting-select"><option value="pad">WASD control pad</option><option value="joystick">Virtual joystick</option></select>
           <p class="setting-help">Hold one or more directions. Keys release automatically when touch or connection ends.</p>
+          <label class="setting-label" for="gameUiSize"><span>Game UI size</span><strong id="gameUiSizeValue">100%</strong></label>
+          <input id="gameUiSize" class="speed-slider" type="range" min="75" max="135" step="5" value="100" aria-describedby="gameUiSizeHelp">
+          <div id="gameUiSizePreview" class="game-ui-size-preview" aria-label="Game UI size preview"><span class="preview-movement">W</span><span class="preview-stick"></span><span class="preview-clicks">L M R</span></div>
+          <p id="gameUiSizeHelp" class="setting-help">Resize movement, mouse, and click controls together. Changes preview live and stay on this device.</p>
+          <div class="drawer-button-row game-ui-setting-actions"><button id="resetGameUiSize" class="ghost-button" type="button">Reset size</button><button id="editGameLayout" class="primary-button" type="button">Edit layout</button><button id="resetGameLayout" class="ghost-button" type="button">Reset layout</button></div>
         </div>
         <label class="setting-label" for="mouseSpeed"><span>Mouse speed</span><strong id="mouseSpeedValue">2.50x</strong></label>
         <input id="mouseSpeed" class="speed-slider" type="range" min="0.5" max="8" step="0.1" value="2.5">
@@ -93,12 +98,18 @@
       <img id="remoteView" alt="Selected window stream">
       <div id="touchLayer" class="touch-layer"></div>
       <section id="gameControls" class="game-controls hidden" aria-label="Game controls">
-        <div class="game-movement-control">
+        <div class="game-layout-toolbar" role="toolbar" aria-label="Game layout editor"><strong>Edit Game layout</strong><span>Drag outlined groups or use focused handle arrow keys.</span><button id="doneGameLayout" class="primary-button" type="button">Done</button><button id="resetGameLayoutOverlay" class="ghost-button" type="button">Reset layout</button></div>
+        <div class="game-layout-group game-movement-control" data-game-layout-group="movement" aria-label="Movement control position">
+          <button class="game-layout-handle" type="button" aria-label="Move movement control. Use arrow keys to adjust.">Move</button>
           <div id="gamePad" class="game-pad" aria-label="WASD control pad"><button class="game-key game-key-w" type="button" data-game-key="w" aria-label="Move forward">W</button><button class="game-key game-key-a" type="button" data-game-key="a" aria-label="Move left">A</button><button class="game-key game-key-s" type="button" data-game-key="s" aria-label="Move backward">S</button><button class="game-key game-key-d" type="button" data-game-key="d" aria-label="Move right">D</button></div>
           <div id="gameJoystick" class="game-joystick hidden" role="application" aria-label="Virtual movement joystick"><div id="gameJoystickKnob" class="game-joystick-knob" aria-hidden="true"></div></div>
         </div>
-        <div class="game-mouse-control" aria-label="Game mouse controls">
+        <div class="game-layout-group game-mouse-stick-control" data-game-layout-group="mouse" aria-label="Mouse stick position">
+          <button class="game-layout-handle" type="button" aria-label="Move mouse stick. Use arrow keys to adjust.">Move</button>
           <div id="gameMouseJoystick" class="game-mouse-joystick" role="application" aria-label="Virtual mouse joystick"><div id="gameMouseJoystickKnob" class="game-mouse-joystick-knob" aria-hidden="true"></div></div>
+        </div>
+        <div class="game-layout-group game-mouse-buttons-control" data-game-layout-group="clicks" aria-label="Mouse click buttons position">
+          <button class="game-layout-handle" type="button" aria-label="Move mouse click buttons. Use arrow keys to adjust.">Move</button>
           <div class="game-mouse-buttons" aria-label="Mouse buttons"><button type="button" data-game-mouse-button="left" aria-label="Left mouse click">Left</button><button type="button" data-game-mouse-button="middle" aria-label="Middle mouse click">Middle</button><button type="button" data-game-mouse-button="right" aria-label="Right mouse click">Right</button></div>
         </div>
       </section>
@@ -122,7 +133,7 @@
   </div>
   <script src="/assets/gestures.js?v=20260718a" defer></script>
   <script src="/assets/gesture-arms.js?v=20260818e" defer></script>
-  <script src="/assets/game-controls.js?v=20260818e" defer></script>
-  <script src="/assets/app.js?v=20260818e" defer></script>
+  <script src="/assets/game-controls.js?v=20260819f" defer></script>
+  <script src="/assets/app.js?v=20260819f" defer></script>
 </body>
 </html>

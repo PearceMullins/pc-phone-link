@@ -32,7 +32,9 @@ DWMWA_CLOAKED = 14
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_SCANCODE = 0x0008
 KEYEVENTF_UNICODE = 0x0004
+MAPVK_VK_TO_VSC = 0
 ULONG_PTR = getattr(wintypes, "ULONG_PTR", wintypes.WPARAM)
 LPCWSTR = getattr(wintypes, "LPCWSTR", ctypes.c_wchar_p)
 HWND_BROADCAST = 0xFFFF
@@ -89,6 +91,20 @@ class RECT(ctypes.Structure):
     ]
 
 
+class GUITHREADINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("hwndActive", wintypes.HWND),
+        ("hwndFocus", wintypes.HWND),
+        ("hwndCapture", wintypes.HWND),
+        ("hwndMenuOwner", wintypes.HWND),
+        ("hwndMoveSize", wintypes.HWND),
+        ("hwndCaret", wintypes.HWND),
+        ("rcCaret", RECT),
+    ]
+
+
 class POINTER_INFO(ctypes.Structure):
     _fields_ = [
         ("pointerType", wintypes.DWORD),
@@ -134,6 +150,12 @@ get_clip_cursor.restype = wintypes.BOOL
 clip_cursor = user32.ClipCursor
 clip_cursor.argtypes = [ctypes.POINTER(RECT)]
 clip_cursor.restype = wintypes.BOOL
+get_gui_thread_info = user32.GetGUIThreadInfo
+get_gui_thread_info.argtypes = [wintypes.DWORD, ctypes.POINTER(GUITHREADINFO)]
+get_gui_thread_info.restype = wintypes.BOOL
+show_window_async = user32.ShowWindowAsync
+show_window_async.argtypes = [wintypes.HWND, ctypes.c_int]
+show_window_async.restype = wintypes.BOOL
 
 _touch_lock = threading.Lock()
 _touch_initialized = False
@@ -867,9 +889,9 @@ def handle_game_key(
 
                 virtual_key = GAME_MOVEMENT_KEYS[normalized_key]
                 if normalized_action == "down":
-                    if not _is_fullscreen_target(hwnd):
-                        focus_window(hwnd)
                     held = _game_keys_by_session.setdefault(normalized_session, set())
+                    if not held:
+                        _prepare_game_input_target(hwnd, normalized_session)
                     owners = _game_key_owners.setdefault(virtual_key, set())
                     if virtual_key not in held:
                         if not owners:
@@ -929,8 +951,24 @@ def release_all_game_keys(session_id: str | None = None, *, reason: str = "lifec
 
 
 def _emit_game_key(virtual_key: int, *, down: bool) -> None:
-    flags = 0 if down else win32con.KEYEVENTF_KEYUP
-    win32api.keybd_event(virtual_key, 0, flags, 0)
+    scan_code = int(win32api.MapVirtualKey(virtual_key, MAPVK_VK_TO_VSC))
+    if not scan_code:
+        raise RuntimeError("Windows could not map the game key to a hardware scan code.")
+    flags = KEYEVENTF_SCANCODE | (KEYEVENTF_KEYUP if not down else 0)
+    _send_inputs(
+        [
+            INPUT(
+                type=INPUT_KEYBOARD,
+                ki=KEYBDINPUT(
+                    wVk=0,
+                    wScan=scan_code,
+                    dwFlags=flags,
+                    time=0,
+                    dwExtraInfo=0,
+                ),
+            )
+        ]
+    )
 
 
 def _renew_game_key_lease_locked(session_id: str, sequence: int) -> None:
@@ -1238,6 +1276,115 @@ def _force_foreground(hwnd: int) -> None:
             win32process.AttachThreadInput(current_thread, foreground_thread, False)
         if attached_to_target:
             win32process.AttachThreadInput(current_thread, target_thread, False)
+
+
+def _game_view_child(hwnd: int) -> int:
+    matches: list[int] = []
+
+    def inspect(child: int, _: object) -> bool:
+        if (
+            win32gui.IsWindowVisible(child)
+            and win32gui.GetClassName(child) == "UnityGUIViewWndClass"
+            and win32gui.GetWindowText(child) == "UnityEditor.GameView"
+        ):
+            matches.append(child)
+            return False
+        return True
+
+    try:
+        win32gui.EnumChildWindows(hwnd, inspect, None)
+    except pywintypes.error:
+        return 0
+    return matches[0] if matches else 0
+
+
+def _thread_focus(hwnd: int) -> int:
+    target_thread = win32process.GetWindowThreadProcessId(hwnd)[0]
+    details = GUITHREADINFO()
+    details.cbSize = ctypes.sizeof(details)
+    if not target_thread or not get_gui_thread_info(target_thread, ctypes.byref(details)):
+        return 0
+    return int(details.hwndFocus or 0)
+
+
+def _activate_game_input_target(hwnd: int, focus_child: int) -> None:
+    current_thread = win32api.GetCurrentThreadId()
+    target_thread = win32process.GetWindowThreadProcessId(hwnd)[0]
+    foreground_window = win32gui.GetForegroundWindow()
+    foreground_thread = win32process.GetWindowThreadProcessId(foreground_window)[0] if foreground_window else 0
+    attached_to_target = False
+    attached_to_foreground = False
+
+    try:
+        if target_thread and target_thread != current_thread:
+            win32process.AttachThreadInput(current_thread, target_thread, True)
+            attached_to_target = True
+        if foreground_thread and foreground_thread not in {0, current_thread, target_thread}:
+            win32process.AttachThreadInput(current_thread, foreground_thread, True)
+            attached_to_foreground = True
+
+        if win32gui.IsIconic(hwnd):
+            show_window_async(hwnd, win32con.SW_RESTORE)
+        if win32gui.GetForegroundWindow() != hwnd:
+            win32gui.SetForegroundWindow(hwnd)
+        win32gui.SetActiveWindow(hwnd)
+        if focus_child and win32gui.IsWindow(focus_child):
+            win32gui.SetFocus(focus_child)
+    finally:
+        if attached_to_foreground:
+            win32process.AttachThreadInput(current_thread, foreground_thread, False)
+        if attached_to_target:
+            win32process.AttachThreadInput(current_thread, target_thread, False)
+
+
+def _prepare_game_input_target(hwnd: int, session_id: str) -> None:
+    if _is_fullscreen_target(hwnd):
+        return
+    if not _GAME_SESSION_ID.fullmatch(session_id):
+        raise ValueError("A valid game input session is required.")
+
+    ensured = _ensure_window(hwnd)
+    focus_child = _game_view_child(ensured)
+    current_focus = _thread_focus(ensured)
+    foreground_ready = win32gui.GetForegroundWindow() == ensured
+    child_ready = not focus_child or current_focus == focus_child
+    if foreground_ready and child_ready:
+        return
+
+    started_at = time.perf_counter()
+    target_kind = "unity-game-view" if focus_child else "window"
+    try:
+        _activate_game_input_target(ensured, focus_child)
+    except Exception as error:
+        log_gesture(
+            "game-input-target-error",
+            {
+                "duration_ms": (time.perf_counter() - started_at) * 1000,
+                "error_code": getattr(error, "winerror", None) or getattr(error, "errno", 0) or 0,
+                "error_type": type(error).__name__,
+                "result": "failed",
+                "state": "activate",
+                "target": target_kind,
+            },
+            level="error",
+        )
+        raise
+
+    foreground_activated = win32gui.GetForegroundWindow() == ensured
+    child_activated = not focus_child or _thread_focus(ensured) == focus_child
+    activated = foreground_activated and child_activated
+    log_gesture(
+        "game-input-target",
+        {
+            "duration_ms": (time.perf_counter() - started_at) * 1000,
+            "result": "focused" if activated else "foreground-rejected",
+            "state": "ready" if activated else "failed",
+            "target": target_kind,
+        },
+        level="info" if activated else "warning",
+    )
+    if not activated:
+        raise RuntimeError("Windows could not focus the selected game window.")
 
 
 def _move_cursor_to_window_point(hwnd: int, x_ratio: float, y_ratio: float) -> tuple[int, int]:

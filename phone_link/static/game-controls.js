@@ -3,6 +3,52 @@
 
   const MOVEMENT_KEYS = Object.freeze(["w", "a", "s", "d"]);
   const INPUT_STYLES = Object.freeze(["pad", "joystick"]);
+  const GAME_LAYOUT_GROUPS = Object.freeze(["movement", "mouse", "clicks"]);
+  const DEFAULT_GAME_LAYOUT = Object.freeze({
+    portrait: Object.freeze({
+      movement: Object.freeze({ x: 0.24, y: 0.76 }),
+      mouse: Object.freeze({ x: 0.76, y: 0.68 }),
+      clicks: Object.freeze({ x: 0.76, y: 0.88 }),
+    }),
+    landscape: Object.freeze({
+      movement: Object.freeze({ x: 0.16, y: 0.68 }),
+      mouse: Object.freeze({ x: 0.84, y: 0.61 }),
+      clicks: Object.freeze({ x: 0.84, y: 0.86 }),
+    }),
+  });
+
+  function clampGameUiScale(value) {
+    if (value === null || value === undefined || value === "") return 1;
+    const candidate = Number(value);
+    if (!Number.isFinite(candidate)) return 1;
+    return Math.max(0.75, Math.min(candidate, 1.35));
+  }
+
+  function defaultGameLayout() {
+    return JSON.parse(JSON.stringify(DEFAULT_GAME_LAYOUT));
+  }
+
+  function normalizeGamePosition(value, fallback) {
+    const x = Number(value?.x);
+    const y = Number(value?.y);
+    return {
+      x: Number.isFinite(x) ? Math.max(0, Math.min(x, 1)) : fallback.x,
+      y: Number.isFinite(y) ? Math.max(0, Math.min(y, 1)) : fallback.y,
+    };
+  }
+
+  function normalizeGameLayout(value) {
+    const result = defaultGameLayout();
+    for (const orientation of ["portrait", "landscape"]) {
+      for (const group of GAME_LAYOUT_GROUPS) {
+        result[orientation][group] = normalizeGamePosition(
+          value?.[orientation]?.[group],
+          DEFAULT_GAME_LAYOUT[orientation][group],
+        );
+      }
+    }
+    return result;
+  }
 
   function normalizeInputStyle(value) {
     return INPUT_STYLES.includes(value) ? value : "pad";
@@ -47,12 +93,18 @@
   }
 
   const api = Object.freeze({
+    DEFAULT_GAME_LAYOUT,
+    GAME_LAYOUT_GROUPS,
     INPUT_STYLES,
     MOVEMENT_KEYS,
+    clampGameUiScale,
+    defaultGameLayout,
     isMovementKey,
     keysForJoystick,
     mouseVectorForJoystick,
     nextControlMode,
+    normalizeGameLayout,
+    normalizeGamePosition,
     normalizeInputStyle,
   });
 

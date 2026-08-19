@@ -48,6 +48,30 @@ def test_app_shell_declares_pwa_and_all_destinations() -> None:
     assert 'id="bottomNavEditor"' in html
     for shortcut in ("desktop", "windows", "keyboard", "controls", "settings"):
         assert f'{shortcut}:' in script
+    for element_id in (
+        "gameControls",
+        "gameInputStyle",
+        "gameUiSize",
+        "gameUiSizeValue",
+        "gameUiSizePreview",
+        "editGameLayout",
+        "resetGameLayout",
+        "doneGameLayout",
+        "resetGameLayoutOverlay",
+        "gameJoystick",
+        "gameMouseJoystick",
+        "gameMouseJoystickKnob",
+        "gamePad",
+    ):
+        assert f'id="{element_id}"' in html
+    assert '<option value="game">Game</option>' in html
+    assert '/game-key`' in script
+    assert 'data-game-mouse-button="middle"' in html
+    assert html.count('data-game-layout-group="') == 3
+    assert 'GAME_LAYOUT_STORAGE_KEY' in script
+    assert 'GAME_UI_SCALE_STORAGE_KEY' in script
+    assert 'gameLayoutEditing' in script
+    assert 'middle_click_current' in script
 
 
 def test_app_shell_ids_match_javascript_references() -> None:

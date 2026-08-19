@@ -23,7 +23,7 @@ _ALLOWED_DETAILS = {
     "action", "buttons", "capture", "client_queued_at_ms", "client_time", "coalesced_count",
     "control_mode", "default_prevented", "delta", "delta_x", "delta_y", "duration_ms", "error_code",
     "error_type", "event_time_ms", "flags", "gesture", "gesture_id", "in_flight", "is_primary",
-    "latency_ms", "mode", "phase", "pointer_count", "pointer_type", "pressure", "queue_depth",
+    "input_style", "key", "latency_ms", "mode", "phase", "pointer_count", "pointer_type", "pressure", "queue_depth",
     "queue_wait_ms", "reason", "recovered", "request_id", "result", "sequence", "session_id",
     "shortcut", "state", "target", "touch_action", "x", "y",
 }

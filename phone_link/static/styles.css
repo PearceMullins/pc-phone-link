@@ -185,6 +185,205 @@ button.mode-active {
   z-index: 6;
 }
 
+.viewer-shell.game-active .touch-layer {
+  pointer-events: none;
+}
+
+.game-input-style-setting {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(92, 132, 255, 0.28);
+  border-radius: 0.9rem;
+  background: rgba(49, 89, 223, 0.09);
+}
+
+.game-input-style-setting.hidden,
+.game-controls.hidden,
+.game-pad.hidden,
+.game-joystick.hidden {
+  display: none;
+}
+
+.game-controls {
+  position: absolute;
+  z-index: 12;
+  left: max(0.65rem, env(safe-area-inset-left));
+  right: max(0.65rem, env(safe-area-inset-right));
+  bottom: max(0.65rem, env(safe-area-inset-bottom));
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+  pointer-events: none;
+  contain: layout paint;
+}
+
+.game-movement-control {
+  display: grid;
+  width: 9.75rem;
+  height: 9.75rem;
+  flex: 0 0 auto;
+  place-items: center;
+  pointer-events: none;
+}
+
+.game-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 3rem);
+  grid-template-rows: repeat(2, 3rem);
+  gap: 0.35rem;
+  pointer-events: auto;
+  touch-action: none;
+  -ms-touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.game-key {
+  min-width: 3rem;
+  min-height: 3rem;
+  padding: 0;
+  border: 1px solid rgba(177, 197, 241, 0.38);
+  border-radius: 0.85rem;
+  background: rgba(7, 14, 27, 0.84);
+  color: #f6f8ff;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1;
+  backdrop-filter: blur(8px);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.game-key-w { grid-column: 2; grid-row: 1; }
+.game-key-a { grid-column: 1; grid-row: 2; }
+.game-key-s { grid-column: 2; grid-row: 2; }
+.game-key-d { grid-column: 3; grid-row: 2; }
+
+.game-key.held,
+.game-key:active {
+  border-color: rgba(255, 186, 146, 0.9);
+  background: rgba(255, 138, 77, 0.82);
+  color: #1d0d05;
+  transform: scale(0.94);
+}
+
+.game-joystick {
+  position: relative;
+  width: 9rem;
+  height: 9rem;
+  border: 1px solid rgba(177, 197, 241, 0.38);
+  border-radius: 50%;
+  background:
+    linear-gradient(rgba(177, 197, 241, 0.12), rgba(177, 197, 241, 0.12)) center / 1px 100% no-repeat,
+    linear-gradient(90deg, rgba(177, 197, 241, 0.12), rgba(177, 197, 241, 0.12)) center / 100% 1px no-repeat,
+    rgba(7, 14, 27, 0.76);
+  box-shadow: inset 0 0 0 1.75rem rgba(92, 132, 255, 0.045);
+  pointer-events: auto;
+  touch-action: none;
+  -ms-touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  backdrop-filter: blur(8px);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.game-joystick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3.2rem;
+  height: 3.2rem;
+  border: 1px solid rgba(255, 208, 180, 0.92);
+  border-radius: 50%;
+  background: rgba(255, 138, 77, 0.85);
+  box-shadow: 0 0.35rem 1rem rgba(0, 0, 0, 0.35);
+  transform: translate(-50%, -50%);
+  will-change: transform;
+}
+
+.game-mouse-control {
+  display: grid;
+  justify-items: center;
+  gap: 0.4rem;
+  width: 7.4rem;
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+.game-mouse-joystick {
+  position: relative;
+  width: 7.2rem;
+  height: 7.2rem;
+  border: 1px solid rgba(177, 197, 241, 0.42);
+  border-radius: 50%;
+  background:
+    linear-gradient(rgba(177, 197, 241, 0.13), rgba(177, 197, 241, 0.13)) center / 1px 100% no-repeat,
+    linear-gradient(90deg, rgba(177, 197, 241, 0.13), rgba(177, 197, 241, 0.13)) center / 100% 1px no-repeat,
+    rgba(7, 14, 27, 0.79);
+  box-shadow: inset 0 0 0 1.3rem rgba(80, 126, 255, 0.045);
+  pointer-events: auto;
+  touch-action: none;
+  -ms-touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  backdrop-filter: blur(8px);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.game-mouse-joystick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2.55rem;
+  height: 2.55rem;
+  border: 1px solid rgba(175, 210, 255, 0.92);
+  border-radius: 50%;
+  background: rgba(73, 139, 255, 0.86);
+  box-shadow: 0 0.3rem 0.85rem rgba(0, 0, 0, 0.35);
+  transform: translate(-50%, -50%);
+  will-change: transform;
+}
+
+.game-mouse-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+  width: 100%;
+  pointer-events: auto;
+  touch-action: none;
+  -ms-touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.game-mouse-buttons button {
+  min-width: 0;
+  min-height: 2.65rem;
+  padding: 0.25rem 0.15rem;
+  border: 1px solid rgba(177, 197, 241, 0.34);
+  border-radius: 0.65rem;
+  background: rgba(7, 14, 27, 0.86);
+  color: #eaf1ff;
+  font-size: 0.66rem;
+  font-weight: 750;
+  line-height: 1;
+  backdrop-filter: blur(8px);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.game-mouse-buttons button.held,
+.game-mouse-buttons button:active {
+  border-color: rgba(158, 203, 255, 0.95);
+  background: rgba(73, 139, 255, 0.86);
+  color: #fff;
+  transform: scale(0.94);
+}
+
 .viewer-status {
   position: absolute;
   z-index: 8;
@@ -865,6 +1064,28 @@ button.mode-active {
   .shortcuts-panel .shortcut-menu-help { margin-bottom: 0.65rem; }
   #app.controls-hidden .mobile-nav, #app.controls-hidden .topbar { display: none; }
   #app.controls-hidden { grid-template-rows: minmax(0, 1fr); }
+}
+
+@media (max-height: 540px) and (hover: none), (max-height: 540px) and (max-width: 899px) {
+  .game-controls { gap: 0.45rem; }
+  .game-movement-control { width: 8rem; height: 8rem; }
+  .game-pad { grid-template-columns: repeat(3, 2.55rem); grid-template-rows: repeat(2, 2.55rem); gap: 0.25rem; }
+  .game-key { min-width: 2.55rem; min-height: 2.55rem; }
+  .game-joystick { width: 7.5rem; height: 7.5rem; }
+  .game-mouse-control { width: 6.8rem; gap: 0.3rem; }
+  .game-mouse-joystick { width: 6.3rem; height: 6.3rem; }
+  .game-mouse-buttons button { min-height: 2.35rem; font-size: 0.61rem; }
+}
+
+@media (max-width: 340px) {
+  .game-controls { left: max(0.35rem, env(safe-area-inset-left)); right: max(0.35rem, env(safe-area-inset-right)); gap: 0.3rem; }
+  .game-movement-control { width: 8.25rem; height: 8.25rem; }
+  .game-pad { grid-template-columns: repeat(3, 2.55rem); grid-template-rows: repeat(2, 2.55rem); gap: 0.25rem; }
+  .game-key { min-width: 2.55rem; min-height: 2.55rem; }
+  .game-joystick { width: 7.8rem; height: 7.8rem; }
+  .game-mouse-control { width: 6.6rem; }
+  .game-mouse-joystick { width: 6.1rem; height: 6.1rem; }
+  .game-mouse-buttons button { min-height: 2.35rem; font-size: 0.59rem; }
 }
 
 @media (min-width: 900px) and (hover: hover) and (pointer: fine) {

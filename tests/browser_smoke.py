@@ -177,6 +177,38 @@ def main() -> None:
                     assert report["restoredMouseControls"], report
                     assert report["removedModeBadge"], report
                     assert report["keyboardOpen"] is (destination == "keyboard"), report
+                game_responsive = browser.evaluate(
+                    """(() => {
+                      state.selectedWindow = { hwnd: 999, bounds: { width: 1280, height: 720 } };
+                      openDestination('viewer');
+                      setControlMode('game');
+                      const viewer = elements.viewerShell.getBoundingClientRect();
+                      const controls = elements.gameControls.getBoundingClientRect();
+                      const movement = document.querySelector('.game-movement-control').getBoundingClientRect();
+                      const mouse = document.querySelector('.game-mouse-control').getBoundingClientRect();
+                      const mouseStick = elements.gameMouseJoystick.getBoundingClientRect();
+                      const minButton = Math.min(...Array.from(document.querySelectorAll('[data-game-mouse-button]'), button => button.getBoundingClientRect().height));
+                      const result = {
+                        visible: !elements.gameControls.classList.contains('hidden'),
+                        left: controls.left, right: controls.right, bottom: controls.bottom,
+                        viewerLeft: viewer.left, viewerRight: viewer.right, viewerBottom: viewer.bottom,
+                        separated: movement.right <= mouse.left + 1,
+                        mouseStickWidth: mouseStick.width,
+                        minButton,
+                        overflow: elements.viewerShell.scrollWidth - elements.viewerShell.clientWidth,
+                      };
+                      setControlMode('touch');
+                      state.selectedWindow = null;
+                      resetViewer();
+                      return result;
+                    })()"""
+                )
+                assert game_responsive["visible"], (width, height, game_responsive)
+                assert game_responsive["left"] >= game_responsive["viewerLeft"] - 1, game_responsive
+                assert game_responsive["right"] <= game_responsive["viewerRight"] + 1, game_responsive
+                assert game_responsive["bottom"] <= game_responsive["viewerBottom"] + 1, game_responsive
+                assert game_responsive["separated"] and game_responsive["overflow"] <= 1, game_responsive
+                assert game_responsive["mouseStickWidth"] >= 95 and game_responsive["minButton"] >= 36, game_responsive
                 power_report = browser.evaluate(
                     """(async () => {
                       openDestination('settings');
@@ -239,6 +271,341 @@ def main() -> None:
                 {"width": 390, "height": 844, "deviceScaleFactor": 2, "mobile": True},
             )
             browser.call("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": 5})
+
+            game_layout = browser.evaluate(
+                """(() => {
+                  window.__gameRealApiFetch = apiFetch;
+                  window.__gameRealRefreshStream = refreshStream;
+                  window.__gameRealToken = state.token;
+                  window.__gameCalls = [];
+                  window.__gameMouseCalls = [];
+                  apiFetch = async (path, options = {}) => {
+                    if (path.includes('/game-key')) {
+                      window.__gameCalls.push({ path, payload: JSON.parse(options.body) });
+                      return { ok: true, applied: true };
+                    }
+                    if (path.includes('/pointer')) {
+                      window.__gameMouseCalls.push({ path, payload: JSON.parse(options.body) });
+                      return { ok: true, cursor: { x: 0.5, y: 0.5, visible: true } };
+                    }
+                    return {};
+                  };
+                  state.token = 'game-test-token';
+                  state.gestureSessionId = 'game-test-session';
+                  refreshStream = () => {};
+                  if (state.streamRefreshTimer) {
+                    clearTimeout(state.streamRefreshTimer);
+                    state.streamRefreshTimer = null;
+                  }
+                  closeStreamSocket();
+                  updateSelectedWindow({ hwnd: 444, bounds: { width: 1280, height: 720 } });
+                  openDestination('viewer');
+                  setGameInputStyle('pad');
+                  setControlMode('game');
+                  const viewer = elements.viewerShell.getBoundingClientRect();
+                  const controls = elements.gameControls.getBoundingClientRect();
+                  const w = document.querySelector('[data-game-key="w"]').getBoundingClientRect();
+                  const mouse = elements.gameMouseJoystick.getBoundingClientRect();
+                  return {
+                    visible: !elements.gameControls.classList.contains('hidden'),
+                    mode: elements.controlMode.value,
+                    style: elements.gameInputStyle.value,
+                    touchDisabled: getComputedStyle(elements.touchLayer).pointerEvents,
+                    viewer: { left: viewer.left, right: viewer.right, top: viewer.top, bottom: viewer.bottom },
+                    controls: { left: controls.left, right: controls.right, top: controls.top, bottom: controls.bottom },
+                    mouse: { left: mouse.left, right: mouse.right, top: mouse.top, bottom: mouse.bottom },
+                    mouseButtons: document.querySelectorAll('[data-game-mouse-button]').length,
+                    w: { x: w.left + w.width / 2, y: w.top + w.height / 2 },
+                  };
+                })()"""
+            )
+            assert game_layout["visible"] and game_layout["mode"] == "game" and game_layout["style"] == "pad", game_layout
+            assert game_layout["touchDisabled"] == "none", game_layout
+            assert game_layout["controls"]["left"] >= game_layout["viewer"]["left"] - 1, game_layout
+            assert game_layout["controls"]["right"] <= game_layout["viewer"]["right"] + 1, game_layout
+            assert game_layout["controls"]["bottom"] <= game_layout["viewer"]["bottom"] + 1, game_layout
+            assert game_layout["mouseButtons"] == 3, game_layout
+            assert game_layout["mouse"]["right"] <= game_layout["viewer"]["right"] + 1, game_layout
+            browser.call(
+                "Input.dispatchMouseEvent",
+                {
+                    "type": "mousePressed", "x": game_layout["w"]["x"], "y": game_layout["w"]["y"],
+                    "button": "left", "buttons": 1, "clickCount": 1,
+                },
+            )
+            time.sleep(0.05)
+            browser.call(
+                "Input.dispatchMouseEvent",
+                {
+                    "type": "mouseReleased", "x": game_layout["w"]["x"], "y": game_layout["w"]["y"],
+                    "button": "left", "buttons": 0, "clickCount": 1,
+                },
+            )
+            time.sleep(0.05)
+            real_game_touch = browser.evaluate(
+                "({calls:window.__gameCalls.map(item=>`${item.payload.action}:${item.payload.key}`),held:[...state.gameHeldKeys],pointers:state.gamePadPointers.size})"
+            )
+            assert real_game_touch["held"] == [] and real_game_touch["pointers"] == 0, real_game_touch
+            assert real_game_touch["calls"] in ([], ["down:w", "up:w"]), real_game_touch
+
+            game_report = browser.evaluate(
+                """(async () => {
+                  const calls = window.__gameCalls;
+                  const mouseCalls = window.__gameMouseCalls;
+                  const captureTargets = [
+                    ...document.querySelectorAll('[data-game-key], [data-game-mouse-button]'),
+                    elements.gameJoystick,
+                    elements.gameMouseJoystick,
+                  ];
+                  captureTargets.forEach(target => { target.setPointerCapture = () => {}; });
+                  calls.length = 0;
+                  mouseCalls.length = 0;
+                  const pointer = (target, type, id, x = 10, y = 10) => target.dispatchEvent(new PointerEvent(type, {
+                    pointerId: id, clientX: x, clientY: y, pointerType: 'touch', bubbles: true, cancelable: true,
+                  }));
+                  const drain = async () => {
+                    await state.gameKeyQueue.catch(() => null);
+                    await state.gameMouseClickQueue.catch(() => null);
+                    for (let attempt = 0; attempt < 20 && state.gameMouseMoveInFlight; attempt += 1) {
+                      await new Promise(resolve => setTimeout(resolve, 0));
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                  };
+                  const key = name => document.querySelector(`[data-game-key="${name}"]`);
+
+                  pointer(key('w'), 'pointerdown', 401);
+                  pointer(key('d'), 'pointerdown', 402);
+                  pointer(key('w'), 'pointerup', 401);
+                  pointer(key('d'), 'pointercancel', 402);
+                  await drain();
+                  const padActions = calls.splice(0).map(item => `${item.payload.action}:${item.payload.key}`);
+                  const padReleased = state.gameHeldKeys.size === 0 && state.gamePadPointers.size === 0;
+
+                  setGameInputStyle('joystick');
+                  const mouseAvailableWithMovementJoystick = !elements.gameMouseJoystick.classList.contains('hidden')
+                    && getComputedStyle(elements.gameMouseJoystick).display !== 'none';
+                  const rect = elements.gameJoystick.getBoundingClientRect();
+                  const cx = rect.left + rect.width / 2;
+                  const cy = rect.top + rect.height / 2;
+                  pointer(elements.gameJoystick, 'pointerdown', 410, cx + rect.width * 0.35, cy - rect.height * 0.35);
+                  pointer(elements.gameJoystick, 'pointermove', 410, cx - rect.width * 0.35, cy + rect.height * 0.35);
+                  pointer(elements.gameJoystick, 'lostpointercapture', 410, cx, cy);
+                  await drain();
+                  const joystickActions = calls.splice(0).map(item => `${item.payload.action}:${item.payload.key}`);
+                  const joystickReleased = state.gameHeldKeys.size === 0
+                    && state.gameJoystickPointerId === null
+                    && state.gameJoystickKeys.size === 0;
+
+                  const mouseRect = elements.gameMouseJoystick.getBoundingClientRect();
+                  const mouseX = mouseRect.left + mouseRect.width / 2;
+                  const mouseY = mouseRect.top + mouseRect.height / 2;
+                  pointer(elements.gameJoystick, 'pointerdown', 411, cx + rect.width * 0.35, cy - rect.height * 0.35);
+                  pointer(elements.gameMouseJoystick, 'pointerdown', 412, mouseX - mouseRect.width * 0.35, mouseY + mouseRect.height * 0.3);
+                  await new Promise(resolve => setTimeout(resolve, 90));
+                  const dualJoystickActive = state.gameHeldKeys.has('w')
+                    && state.gameHeldKeys.has('d')
+                    && state.gameMousePointerId === 412
+                    && state.gameMouseVector.x < 0
+                    && state.gameMouseVector.y > 0;
+                  pointer(elements.gameMouseJoystick, 'pointerup', 412, mouseX, mouseY);
+                  pointer(elements.gameJoystick, 'pointerup', 411, cx, cy);
+                  await drain();
+                  const dualJoystickKeyActions = calls.splice(0).map(item => `${item.payload.action}:${item.payload.key}`);
+                  const dualJoystickMouseMoves = mouseCalls.splice(0).filter(item => item.payload.action === 'move_relative').length;
+
+                  setGameInputStyle('pad');
+                  const mouseButton = name => document.querySelector(`[data-game-mouse-button="${name}"]`);
+                  pointer(key('w'), 'pointerdown', 430);
+                  pointer(elements.gameMouseJoystick, 'pointerdown', 431, mouseX + mouseRect.width * 0.38, mouseY - mouseRect.height * 0.3);
+                  await new Promise(resolve => setTimeout(resolve, 100));
+                  const simultaneousSnapshot = {
+                    held: [...state.gameHeldKeys],
+                    mousePointer: state.gameMousePointerId,
+                    mouseX: state.gameMouseVector.x,
+                    mouseY: state.gameMouseVector.y,
+                    mode: state.controlMode,
+                    destination: state.currentDestination,
+                    keyCalls: calls.map(item => `${item.payload.action}:${item.payload.reason}`),
+                  };
+                  const simultaneousActive = simultaneousSnapshot.held.includes('w')
+                    && simultaneousSnapshot.mousePointer === 431
+                    && simultaneousSnapshot.mouseX > 0
+                    && simultaneousSnapshot.mouseY < 0;
+                  for (const [index, name] of ['left', 'middle', 'right'].entries()) {
+                    pointer(mouseButton(name), 'pointerdown', 440 + index);
+                    pointer(mouseButton(name), 'pointerup', 440 + index);
+                  }
+                  await drain();
+                  pointer(elements.gameMouseJoystick, 'pointerup', 431, mouseX, mouseY);
+                  pointer(key('w'), 'pointerup', 430);
+                  await drain();
+                  const simultaneousKeyActions = calls.splice(0).map(item => `${item.payload.action}:${item.payload.key}`);
+                  const mouseActions = mouseCalls.splice(0).map(item => item.payload.action);
+                  const mouseReleased = state.gameMousePointerId === null
+                    && state.gameMouseVector.magnitude === 0
+                    && state.gameMouseFrame === null
+                    && state.pendingGameMouseMove === null
+                    && state.gameMouseClickPointers.size === 0;
+
+                  pointer(mouseButton('middle'), 'pointerdown', 448);
+                  pointer(mouseButton('middle'), 'pointercancel', 448);
+                  pointer(mouseButton('right'), 'pointerdown', 449);
+                  pointer(mouseButton('right'), 'lostpointercapture', 449);
+                  await drain();
+                  const canceledClickActions = mouseCalls.splice(0).map(item => item.payload.action);
+                  const canceledClicksReleased = state.gameMouseClickPointers.size === 0;
+
+                  pointer(elements.gameMouseJoystick, 'pointerdown', 450, mouseX + mouseRect.width * 0.4, mouseY);
+                  pointer(elements.gameMouseJoystick, 'pointercancel', 450, mouseX, mouseY);
+                  const pointerCancelReleased = state.gameMousePointerId === null && state.gameMouseFrame === null;
+                  pointer(elements.gameMouseJoystick, 'pointerdown', 451, mouseX, mouseY - mouseRect.height * 0.4);
+                  pointer(elements.gameMouseJoystick, 'lostpointercapture', 451, mouseX, mouseY);
+                  const lostCaptureReleased = state.gameMousePointerId === null && state.gameMouseFrame === null;
+
+                  pointer(key('a'), 'pointerdown', 420);
+                  pointer(elements.gameMouseJoystick, 'pointerdown', 452, mouseX + mouseRect.width * 0.4, mouseY);
+                  pointer(mouseButton('left'), 'pointerdown', 453);
+                  window.dispatchEvent(new Event('blur'));
+                  await drain();
+                  const blurActions = calls.splice(0).map(item => item.payload.action);
+                  const blurReleased = state.gameHeldKeys.size === 0
+                    && state.gameMousePointerId === null
+                    && state.gameMouseClickPointers.size === 0
+                    && state.gameMouseFrame === null;
+
+                  pointer(key('s'), 'pointerdown', 421);
+                  pointer(elements.gameMouseJoystick, 'pointerdown', 454, mouseX, mouseY + mouseRect.height * 0.4);
+                  openDestination('controls');
+                  await drain();
+                  const destinationActions = calls.splice(0).map(item => item.payload.action);
+                  const destinationReleased = state.gameHeldKeys.size === 0 && state.gameMousePointerId === null;
+
+                  openDestination('viewer');
+                  setControlMode('game');
+                  pointer(elements.gameMouseJoystick, 'pointerdown', 455, mouseX + mouseRect.width * 0.4, mouseY);
+                  setControlMode('touch');
+                  const modeReleased = state.gameMousePointerId === null && state.gameMouseFrame === null;
+                  setControlMode('game');
+
+                  pointer(elements.gameMouseJoystick, 'pointerdown', 456, mouseX + mouseRect.width * 0.4, mouseY);
+                  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+                  document.dispatchEvent(new Event('visibilitychange'));
+                  delete document.visibilityState;
+                  const visibilityReleased = state.gameMousePointerId === null && state.gameMouseFrame === null;
+
+                  pointer(elements.gameMouseJoystick, 'pointerdown', 457, mouseX + mouseRect.width * 0.4, mouseY);
+                  setConnectionStatus('Offline', false);
+                  const disconnectReleased = state.gameMousePointerId === null && state.gameMouseFrame === null;
+                  setConnectionStatus('Connected', true);
+
+                  pointer(key('d'), 'pointerdown', 422);
+                  pointer(elements.gameMouseJoystick, 'pointerdown', 458, mouseX + mouseRect.width * 0.4, mouseY);
+                  updateSelectedWindow({ hwnd: 445, bounds: { width: 1280, height: 720 } });
+                  await drain();
+                  const targetActions = calls.splice(0).map(item => item.payload.action);
+                  const targetReleased = state.gameHeldKeys.size === 0 && state.gameMousePointerId === null;
+
+                  const mouseStableApiFetch = apiFetch;
+                  apiFetch = async (path, options = {}) => {
+                    if (path.includes('/pointer')) throw new Error('simulated mouse transport loss');
+                    return mouseStableApiFetch(path, options);
+                  };
+                  pointer(elements.gameMouseJoystick, 'pointerdown', 459, mouseX + mouseRect.width * 0.4, mouseY);
+                  await new Promise(resolve => setTimeout(resolve, 90));
+                  await drain();
+                  const mouseErrorReleased = state.gameMousePointerId === null
+                    && state.gameMouseFrame === null
+                    && state.pendingGameMouseMove === null;
+                  apiFetch = mouseStableApiFetch;
+
+                  setControlMode('game');
+                  setGameInputStyle('pad');
+                  const stableApiFetch = apiFetch;
+                  apiFetch = async (path, options = {}) => {
+                    if (!path.includes('/game-key')) return {};
+                    const payload = JSON.parse(options.body);
+                    calls.push({ path, payload });
+                    if (payload.action === 'up') throw new Error('simulated transport loss');
+                    return { ok: true, applied: true };
+                  };
+                  pointer(key('w'), 'pointerdown', 423);
+                  await drain();
+                  pointer(key('w'), 'pointerup', 423);
+                  await drain();
+                  const errorActions = calls.splice(0).map(item => item.payload.action);
+                  const errorReleased = state.gameHeldKeys.size === 0 && state.gamePadPointers.size === 0;
+                  apiFetch = stableApiFetch;
+
+                  localStorage.setItem(CONTROL_MODE_STORAGE_KEY, 'game');
+                  localStorage.setItem(GAME_INPUT_STYLE_STORAGE_KEY, 'joystick');
+                  loadViewerPreferences();
+                  const persisted = {
+                    mode: state.controlMode,
+                    style: state.gameInputStyle,
+                    selectMode: elements.controlMode.value,
+                    selectStyle: elements.gameInputStyle.value,
+                  };
+
+                  setControlMode('touch');
+                  state.selectedWindow = null;
+                  resetViewer();
+                  apiFetch = window.__gameRealApiFetch;
+                  refreshStream = window.__gameRealRefreshStream;
+                  state.token = window.__gameRealToken;
+                  delete window.__gameRealApiFetch;
+                  delete window.__gameRealRefreshStream;
+                  delete window.__gameRealToken;
+                  delete window.__gameCalls;
+                  delete window.__gameMouseCalls;
+                  captureTargets.forEach(target => { delete target.setPointerCapture; });
+                  localStorage.removeItem(CONTROL_MODE_STORAGE_KEY);
+                  localStorage.removeItem(GAME_INPUT_STYLE_STORAGE_KEY);
+                  return {
+                    padActions, padReleased, joystickActions, joystickReleased,
+                    mouseAvailableWithMovementJoystick, dualJoystickActive, dualJoystickKeyActions, dualJoystickMouseMoves,
+                    simultaneousSnapshot, simultaneousActive, simultaneousKeyActions, mouseActions, mouseReleased,
+                    canceledClickActions, canceledClicksReleased,
+                    pointerCancelReleased, lostCaptureReleased,
+                    blurActions, blurReleased, destinationActions, destinationReleased,
+                    modeReleased, visibilityReleased, disconnectReleased,
+                    targetActions, targetReleased, mouseErrorReleased, errorActions, errorReleased, persisted,
+                  };
+                })()""",
+                await_promise=True,
+            )
+            assert game_report["padActions"] == ["down:w", "down:d", "up:w", "up:d"], game_report
+            assert game_report["padReleased"], game_report
+            assert game_report["joystickActions"] == [
+                "down:w", "down:d", "up:w", "up:d", "down:a", "down:s", "up:a", "up:s",
+            ], game_report
+            assert game_report["joystickReleased"], game_report
+            assert game_report["mouseAvailableWithMovementJoystick"], game_report
+            assert game_report["dualJoystickActive"], game_report
+            assert game_report["dualJoystickKeyActions"] == ["down:w", "down:d", "up:w", "up:d"], game_report
+            assert game_report["dualJoystickMouseMoves"] >= 1, game_report
+            assert game_report["simultaneousActive"], game_report
+            assert game_report["simultaneousKeyActions"] == ["down:w", "up:w"], game_report
+            assert game_report["mouseActions"].count("move_relative") >= 1, game_report
+            assert [action for action in game_report["mouseActions"] if action != "move_relative"] == [
+                "click_current", "middle_click_current", "right_click_current",
+            ], game_report
+            assert game_report["mouseReleased"], game_report
+            assert game_report["canceledClickActions"] == [] and game_report["canceledClicksReleased"], game_report
+            assert game_report["pointerCancelReleased"] and game_report["lostCaptureReleased"], game_report
+            assert sorted(game_report["blurActions"]) == ["down", "release_all"], game_report
+            assert game_report["blurReleased"], game_report
+            assert game_report["destinationActions"] == ["down", "release_all"], game_report
+            assert game_report["destinationReleased"], game_report
+            assert game_report["modeReleased"] and game_report["visibilityReleased"], game_report
+            assert game_report["disconnectReleased"], game_report
+            assert game_report["targetActions"] == ["down", "release_all"], game_report
+            assert game_report["targetReleased"], game_report
+            assert game_report["mouseErrorReleased"], game_report
+            assert game_report["errorActions"] == ["down", "up", "release_all"], game_report
+            assert game_report["errorReleased"], game_report
+            assert game_report["persisted"] == {
+                "mode": "game", "style": "joystick", "selectMode": "game", "selectStyle": "joystick",
+            }, game_report
 
             browser.evaluate(
                 """(() => {

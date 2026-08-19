@@ -10,7 +10,7 @@
   <title>PC Phone Link</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="/assets/styles.css?v=20260818c">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260818e">
 </head>
 <body>
   <div id="app">
@@ -26,8 +26,13 @@
       <div class="drawer-header"><div><p class="eyebrow">Remote input</p><h1>Controls</h1></div></div>
       <section id="controlBar" class="drawer-settings">
         <label class="setting-label" for="controlMode"><span>Control style</span></label>
-        <select id="controlMode" class="setting-select"><option value="touch">App touch</option><option value="trackpad">Mouse trackpad</option></select>
-        <p id="controlModeHelp" class="setting-help">Tap to click, double-tap to right-click, quick two-finger tap to double-click, one finger to pan viewer, hold two fingers until Scroll ready then hold one finger and drag the other to scroll, and pinch to zoom.</p>
+        <select id="controlMode" class="setting-select"><option value="touch">App touch</option><option value="trackpad">Mouse trackpad</option><option value="game">Game</option></select>
+        <p id="controlModeHelp" class="setting-help">Tap to click, double-tap to right-click, quick two-finger tap to double-click, one finger to pan viewer, hold two fingers until Scroll ready then drag the first finger to left-click drag or the second to scroll, and pinch to zoom. Shortcuts stay active until changed.</p>
+        <div id="gameInputStyleSetting" class="game-input-style-setting hidden">
+          <label class="setting-label" for="gameInputStyle"><span>Movement control</span></label>
+          <select id="gameInputStyle" class="setting-select"><option value="pad">WASD control pad</option><option value="joystick">Virtual joystick</option></select>
+          <p class="setting-help">Hold one or more directions. Keys release automatically when touch or connection ends.</p>
+        </div>
         <label class="setting-label" for="mouseSpeed"><span>Mouse speed</span><strong id="mouseSpeedValue">2.50x</strong></label>
         <input id="mouseSpeed" class="speed-slider" type="range" min="0.5" max="8" step="0.1" value="2.5">
         <label class="toggle-setting" for="followMouse"><span>Follow mouse</span><input id="followMouse" type="checkbox"></label>
@@ -84,7 +89,21 @@
       <div class="topbar-actions"><button id="powerToggle" class="ghost-button" type="button" aria-expanded="false" aria-controls="powerMenu" aria-haspopup="true">Power</button><button id="fitToggle" class="ghost-button" type="button">Fit</button><button id="toggleKeyboard" class="ghost-button" type="button">Keyboard</button><button class="ghost-button desktop-panel-button" type="button" data-destination="controls">Controls</button><button class="ghost-button desktop-panel-button" type="button" data-destination="settings">Settings</button><button id="toggleControls" class="ghost-button controls-toggle-button" type="button" aria-pressed="false">Hide controls</button><div id="powerMenu" class="power-menu hidden"><button type="button" class="power-menu-item" data-power-action="lock">Lock</button><button type="button" class="power-menu-item" data-power-action="sleep">Sleep</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="restart">Restart</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="shutdown">Shut down</button></div></div>
     </header>
 
-    <main id="viewerShell" class="viewer-shell"><img id="remoteView" alt="Selected window stream"><div id="touchLayer" class="touch-layer"></div><div class="viewer-status" aria-live="polite"><output id="gestureStatus" hidden></output></div><div id="emptyState" class="empty-state" hidden></div></main>
+    <main id="viewerShell" class="viewer-shell">
+      <img id="remoteView" alt="Selected window stream">
+      <div id="touchLayer" class="touch-layer"></div>
+      <section id="gameControls" class="game-controls hidden" aria-label="Game controls">
+        <div class="game-movement-control">
+          <div id="gamePad" class="game-pad" aria-label="WASD control pad"><button class="game-key game-key-w" type="button" data-game-key="w" aria-label="Move forward">W</button><button class="game-key game-key-a" type="button" data-game-key="a" aria-label="Move left">A</button><button class="game-key game-key-s" type="button" data-game-key="s" aria-label="Move backward">S</button><button class="game-key game-key-d" type="button" data-game-key="d" aria-label="Move right">D</button></div>
+          <div id="gameJoystick" class="game-joystick hidden" role="application" aria-label="Virtual movement joystick"><div id="gameJoystickKnob" class="game-joystick-knob" aria-hidden="true"></div></div>
+        </div>
+        <div class="game-mouse-control" aria-label="Game mouse controls">
+          <div id="gameMouseJoystick" class="game-mouse-joystick" role="application" aria-label="Virtual mouse joystick"><div id="gameMouseJoystickKnob" class="game-mouse-joystick-knob" aria-hidden="true"></div></div>
+          <div class="game-mouse-buttons" aria-label="Mouse buttons"><button type="button" data-game-mouse-button="left" aria-label="Left mouse click">Left</button><button type="button" data-game-mouse-button="middle" aria-label="Middle mouse click">Middle</button><button type="button" data-game-mouse-button="right" aria-label="Right mouse click">Right</button></div>
+        </div>
+      </section>
+      <div class="viewer-status" aria-live="polite"><output id="gestureStatus" hidden></output></div><div id="emptyState" class="empty-state" hidden></div>
+    </main>
 
     <section id="keyboardPanel" class="keyboard-panel hidden" data-panel="keyboard">
       <div class="composer-actions"><button id="toggleMessageHistory" class="ghost-button message-history-toggle" type="button" hidden>Show past messages</button><button id="voiceInput" class="ghost-button" type="button">Voice</button><button id="clearTextInput" class="ghost-button composer-clear-button" type="button">Clear</button></div>
@@ -102,7 +121,8 @@
     <div id="toast" class="toast hidden"></div>
   </div>
   <script src="/assets/gestures.js?v=20260718a" defer></script>
-  <script src="/assets/gesture-arms.js?v=20260818c" defer></script>
-  <script src="/assets/app.js?v=20260818c" defer></script>
+  <script src="/assets/gesture-arms.js?v=20260818e" defer></script>
+  <script src="/assets/game-controls.js?v=20260818e" defer></script>
+  <script src="/assets/app.js?v=20260818e" defer></script>
 </body>
 </html>

@@ -51,10 +51,12 @@ from .windows_host import (
     focus_window,
     get_system_text_scale,
     get_window_cursor_state,
+    handle_game_key,
     handle_pointer,
     list_windows,
     maximize_window,
     press_special_key,
+    release_all_game_keys,
     restore_window,
     send_text,
     window_to_dict,
@@ -93,6 +95,15 @@ class TextRequest(BaseModel):
 
 class SpecialKeyRequest(BaseModel):
     key: str
+
+
+class GameKeyRequest(BaseModel):
+    action: str = Field(max_length=20)
+    key: str = Field(default="", max_length=8)
+    session_id: str = Field(min_length=1, max_length=80)
+    sequence: int = Field(default=0, ge=0)
+    reason: str = Field(default="input", max_length=40)
+    input_style: str = Field(default="pad", max_length=20)
 
 
 class PhoneFitRequest(BaseModel):
@@ -158,6 +169,7 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
 
     @app.on_event("shutdown")
     async def log_shutdown_event() -> None:
+        release_all_game_keys(reason="shutdown")
         log_event("host", "app-stopped", {})
 
     @app.middleware("http")
@@ -547,6 +559,56 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
         _handle_window_action(lambda: press_special_key(hwnd, payload.key))
         log_event("host", "special-key-finished", {"hwnd": hwnd, "key": payload.key})
         return {"ok": True}
+
+    @app.post("/api/windows/{hwnd}/game-key")
+    async def game_key(hwnd: int, payload: GameKeyRequest, request: Request) -> dict[str, bool]:
+        _require_token(app, request)
+        safe_key = payload.key.strip().lower() if payload.key.strip().lower() in {"w", "a", "s", "d"} else "none"
+        context = {
+            "session_id": payload.session_id,
+            "sequence": payload.sequence,
+            "action": payload.action,
+            "key": safe_key,
+            "input_style": payload.input_style,
+            "reason": payload.reason,
+            "target": "desktop" if hwnd == FULLSCREEN_TARGET_HWND else "window",
+        }
+        started_at = time.perf_counter()
+        with gesture_context(context):
+            log_gesture("game-key-server-received", {"state": "dispatch"})
+            try:
+                applied = _handle_window_action(
+                    lambda: handle_game_key(
+                        hwnd,
+                        payload.action,
+                        payload.key,
+                        payload.session_id,
+                        payload.sequence,
+                        input_style=payload.input_style,
+                    )
+                )
+            except HTTPException as error:
+                cause = error.__cause__
+                log_gesture(
+                    "game-key-server-error",
+                    {
+                        "duration_ms": (time.perf_counter() - started_at) * 1000,
+                        "error_code": getattr(cause, "winerror", None) or getattr(cause, "errno", 0) or 0,
+                        "error_type": type(cause or error).__name__,
+                        "result": "failed",
+                    },
+                    level="error",
+                )
+                release_all_game_keys(session_id=payload.session_id, reason="request-error")
+                raise
+            log_gesture(
+                "game-key-server-finished",
+                {
+                    "duration_ms": (time.perf_counter() - started_at) * 1000,
+                    "result": "applied" if applied else "ignored",
+                },
+            )
+        return {"ok": True, "applied": bool(applied)}
 
     register_stream_routes(app, require_token=lambda request: _require_token(app, request))
 
@@ -984,9 +1046,9 @@ def _serialize_trusted_device(entry: dict[str, Any], current_token: str) -> dict
     }
 
 
-def _handle_window_action(callback: Any) -> None:
+def _handle_window_action(callback: Any) -> Any:
     try:
-        callback()
+        return callback()
     except WindowLookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:

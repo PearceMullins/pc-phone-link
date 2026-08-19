@@ -35,6 +35,7 @@ def test_service_worker_caches_shell_not_authenticated_pages() -> None:
     assert 'fetch(request).catch' in worker
     assert '"/"' not in worker.split("const SHELL = [", 1)[1].split("];", 1)[0]
     assert "/api/" not in worker.split("const SHELL = [", 1)[1].split("];", 1)[0]
+    assert '"/assets/game-controls.js?' in worker
 
 
 def test_app_shell_declares_pwa_and_all_destinations() -> None:

@@ -164,6 +164,9 @@ Phones and iPads default to Full screen, Windows, Keyboard, Shortcuts, Controls,
 | ---- | -------- |
 | **App touch** (default) | Tap clicks directly; double-tap right-clicks; quick two-finger tap double-clicks; one finger pans viewer; hold two fingers for Scroll ready then hold one finger and drag the other to scroll PC content; pinch zooms; mouse cursor stays put |
 | **Mouse trackpad** | Drag moves PC mouse; tap clicks; speed and follow-mouse settings remain configurable |
+| **Game** | Choose a multi-touch WASD pad or circular movement joystick. A separate right-side mouse joystick moves the PC cursor continuously with dead-zone and speed scaling; nearby Left, Middle, and Right buttons click without holding a native mouse button. Movement and mouse controls work together, including diagonals, and stop automatically on touch, focus, connection, target, or mode loss |
+
+Game control style and pad/joystick choice persist on each phone. Both layouts keep the mouse stick and click buttons under the right thumb. A short host-side lease also releases movement keys if browser cleanup cannot arrive after an abrupt disconnect; mouse movement is request-based and stops immediately when its stick returns neutral or its pointer lifecycle ends.
 
 ### Keyboard and streaming
 

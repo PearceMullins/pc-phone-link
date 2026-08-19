@@ -14,6 +14,30 @@ const state = {
   mouseSpeed: 2.5,
   gestureArm: "gestures",
   controlMode: "touch",
+  gameInputStyle: "pad",
+  gameHeldKeys: new Set(),
+  gamePadPointers: new Map(),
+  gameJoystickPointerId: null,
+  gameJoystickKeys: new Set(),
+  gameTargetHwnd: null,
+  gameKeyQueue: Promise.resolve(),
+  gameKeySequence: 0,
+  gameHeartbeatTimer: null,
+  gameErrorShown: false,
+  lastGameMoveLoggedAt: 0,
+  gameMousePointerId: null,
+  gameMouseVector: { x: 0, y: 0, magnitude: 0 },
+  gameMouseFrame: null,
+  gameMouseLastFrameAt: 0,
+  gameMouseMoveInFlight: false,
+  pendingGameMouseMove: null,
+  gameMouseGeneration: 0,
+  gameMouseAbortController: null,
+  gameMouseTargetHwnd: null,
+  gameMouseClickPointers: new Map(),
+  gameMouseClickQueue: Promise.resolve(),
+  gameMouseClickGeneration: 0,
+  lastGameMouseMoveLoggedAt: 0,
   controlsHidden: false,
   bottomNavOptional: [],
   currentDestination: "viewer",
@@ -112,6 +136,7 @@ const ACCESS_TOKEN_STORAGE_KEY = "pc-phone-link-token";
 const PAIRING_DEVICE_NAME_STORAGE_KEY = "pc-phone-link-pairing-device-name";
 const FIT_SHAPE_STORAGE_KEY = "pc-phone-link-fit-shape";
 const CONTROL_MODE_STORAGE_KEY = "pc-phone-link-control-mode";
+const GAME_INPUT_STYLE_STORAGE_KEY = "pc-phone-link-game-input-style";
 const POINTER_SHORTCUT_STORAGE_KEY = "pc-phone-link-pointer-shortcut";
 const BOTTOM_NAV_STORAGE_KEY = "pc-phone-link-bottom-nav";
 const GESTURE_DIAGNOSTICS_STORAGE_KEY = "pc-phone-link-gesture-diagnostics";
@@ -127,6 +152,11 @@ const MAX_VISIBLE_MESSAGE_HISTORY = 12;
 const KEYBOARD_VISIBLE_HEIGHT_DELTA = 140;
 const KEYBOARD_VISIBLE_HEIGHT_RATIO = 0.18;
 const DIRECT_TOUCH_DRAG_THRESHOLD = 7;
+const GAME_JOYSTICK_DEADZONE = 0.28;
+const GAME_KEY_HEARTBEAT_MS = 650;
+const GAME_MOUSE_DEADZONE = 0.16;
+const GAME_MOUSE_FRAME_MS = 24;
+const GAME_MOUSE_MAX_SPEED_PX_PER_SECOND = 900;
 const DOUBLE_TAP_DELAY_MS = 320;
 const DOUBLE_TAP_DISTANCE_PX = 28;
 const TWO_FINGER_PINCH_THRESHOLD = 12;
@@ -210,6 +240,14 @@ const elements = {
   controlsPanel: document.getElementById("controlsPanel"),
   controlMode: document.getElementById("controlMode"),
   controlModeHelp: document.getElementById("controlModeHelp"),
+  gameControls: document.getElementById("gameControls"),
+  gameInputStyle: document.getElementById("gameInputStyle"),
+  gameInputStyleSetting: document.getElementById("gameInputStyleSetting"),
+  gameJoystick: document.getElementById("gameJoystick"),
+  gameJoystickKnob: document.getElementById("gameJoystickKnob"),
+  gameMouseJoystick: document.getElementById("gameMouseJoystick"),
+  gameMouseJoystickKnob: document.getElementById("gameMouseJoystickKnob"),
+  gamePad: document.getElementById("gamePad"),
   pairingApprovalCodeBlock: document.getElementById("pairingApprovalCodeBlock"),
   pairingApprovalCodeDisplay: document.getElementById("pairingApprovalCodeDisplay"),
   pairingDeviceName: document.getElementById("pairingDeviceName"),
@@ -352,7 +390,11 @@ function bottomNavItemState(id) {
 }
 
 function bottomNavLabel(id) {
-  if (id === "modeToggle") return state.controlMode === "touch" ? "App touch" : "Mouse trackpad";
+  if (id === "modeToggle") {
+    if (state.controlMode === "touch") return "App touch";
+    if (state.controlMode === "trackpad") return "Mouse trackpad";
+    return "Game";
+  }
   return BOTTOM_NAV_CATALOG[id]?.label || id;
 }
 
@@ -527,7 +569,7 @@ async function executeBottomNavAction(id) {
       togglePowerMenu(true, "settings");
     }
   } else if (id === "modeToggle") {
-    setControlMode(state.controlMode === "touch" ? "trackpad" : "touch");
+    setControlMode(window.PCPhoneLinkGameControls.nextControlMode(state.controlMode));
     showGestureStatus(bottomNavLabel(id));
   }
   renderBottomNav();
@@ -622,18 +664,53 @@ function syncControlMode() {
       : "Drag to move PC mouse, tap to click, and use Shortcuts for persistent scrolling, right-click, and other pointer modes.";
   }
   elements.viewerShell.classList.toggle("direct-touch-active", state.controlMode === "touch");
+  elements.viewerShell.classList.toggle("game-active", state.controlMode === "game");
+  syncGameControlsUi();
 }
 
 function setControlMode(value) {
-  const nextMode = value === "trackpad" ? "trackpad" : "touch";
+  const nextMode = ["touch", "trackpad", "game"].includes(value) ? value : "touch";
   if (nextMode !== state.controlMode) cancelPendingTap("mode-change");
   if (nextMode !== state.controlMode && (state.pointerDown || state.activePointers.size)) {
     releaseActiveTouches();
   }
+  if (nextMode !== state.controlMode) releaseAllGameKeys("mode-change");
   state.controlMode = nextMode;
   window.localStorage.setItem(CONTROL_MODE_STORAGE_KEY, state.controlMode);
   syncControlMode();
   renderBottomNav();
+}
+
+function setGameInputStyle(value) {
+  const nextStyle = window.PCPhoneLinkGameControls.normalizeInputStyle(value);
+  if (nextStyle !== state.gameInputStyle) releaseAllGameKeys("style-change");
+  state.gameInputStyle = nextStyle;
+  window.localStorage.setItem(GAME_INPUT_STYLE_STORAGE_KEY, nextStyle);
+  syncGameControlsUi();
+  logGestureDiagnostic("game-input-style", {
+    input_style: nextStyle,
+    reason: "selection",
+    state: "ready",
+  });
+}
+
+function syncGameControlsUi() {
+  if (elements.gameInputStyle) elements.gameInputStyle.value = state.gameInputStyle;
+  elements.gameInputStyleSetting?.classList.toggle("hidden", state.controlMode !== "game");
+  const visible = state.controlMode === "game"
+    && state.currentDestination === "viewer"
+    && Boolean(state.selectedWindow)
+    && usesMobileShell();
+  if (!visible && (state.gameHeldKeys.size || state.gamePadPointers.size || state.gameJoystickPointerId !== null
+    || state.gameMousePointerId !== null || state.gameMouseClickPointers.size)) {
+    releaseAllGameKeys("layout-hidden");
+  }
+  elements.gameControls?.classList.toggle("hidden", !visible);
+  elements.gameControls?.setAttribute("aria-hidden", String(!visible));
+  elements.gamePad?.classList.toggle("hidden", state.gameInputStyle !== "pad");
+  elements.gameJoystick?.classList.toggle("hidden", state.gameInputStyle !== "joystick");
+  syncGameHeldUi();
+  resetGameMouseUi();
 }
 
 function clampStreamFps(value) {
@@ -1029,7 +1106,7 @@ function safeGestureDetails(details = {}) {
   const allowed = new Set([
     "action", "buttons", "capture", "client_queued_at_ms", "coalesced_count", "control_mode",
     "default_prevented", "delta", "delta_x", "delta_y", "duration_ms", "error_code", "error_type",
-    "event_time_ms", "gesture", "gesture_id", "in_flight", "is_primary", "latency_ms", "mode", "phase",
+    "event_time_ms", "gesture", "gesture_id", "in_flight", "input_style", "is_primary", "key", "latency_ms", "mode", "phase",
     "pointer_count", "pointer_type", "pressure", "queue_depth", "queue_wait_ms", "reason", "request_id",
     "result", "sequence", "session_id", "shortcut", "state", "target", "touch_action", "x", "y",
   ]);
@@ -1250,7 +1327,10 @@ function loadViewerPreferences() {
   const savedFitShape = window.localStorage.getItem(FIT_SHAPE_STORAGE_KEY) || "auto";
   state.fitShape = FIT_SHAPES[savedFitShape] ? savedFitShape : "auto";
   const savedControlMode = window.localStorage.getItem(CONTROL_MODE_STORAGE_KEY) || "touch";
-  state.controlMode = savedControlMode === "trackpad" ? "trackpad" : "touch";
+  state.controlMode = ["touch", "trackpad", "game"].includes(savedControlMode) ? savedControlMode : "touch";
+  state.gameInputStyle = window.PCPhoneLinkGameControls.normalizeInputStyle(
+    window.localStorage.getItem(GAME_INPUT_STYLE_STORAGE_KEY),
+  );
   state.gestureDiagnosticsEnabled = window.localStorage.getItem(GESTURE_DIAGNOSTICS_STORAGE_KEY) !== "false";
   state.gestureSessionId = diagnosticId("session");
   const savedStreamFps = Number.parseInt(window.localStorage.getItem(STREAM_FPS_STORAGE_KEY) || "", 10);
@@ -1801,6 +1881,7 @@ async function bootstrap({ quiet = false } = {}) {
 }
 
 function setConnectionStatus(label, connected) {
+  if (!connected) releaseAllGameKeys("connection-loss", { keepalive: true });
   if (!elements.connectionStatus) return;
   elements.connectionStatus.textContent = label;
   elements.connectionStatus.classList.toggle("connected", Boolean(connected));
@@ -2103,6 +2184,7 @@ function updateSelectedWindow(windowInfo) {
   }
 
   if (!state.selectedWindow || state.selectedWindow.hwnd !== windowInfo.hwnd) {
+    releaseAllGameKeys("target-change");
     cancelPendingTap("selected-window-change");
     state.typingAnchor = null;
   }
@@ -2225,6 +2307,7 @@ function rememberRecentWindow(windowInfo) {
 }
 
 async function selectWindow(windowInfo) {
+  if (state.selectedWindow?.hwnd !== windowInfo.hwnd) releaseAllGameKeys("target-change");
   state.streamSocketFailures = 0;
   const response = await apiFetch(`/api/windows/${windowInfo.hwnd}/activate`, {
     method: "POST",
@@ -2384,6 +2467,7 @@ function openStreamSocket(params) {
       return;
     }
     state.streamSocket = null;
+    releaseAllGameKeys("stream-disconnect", { keepalive: true });
     if (!receivedFrame) {
       // The socket never delivered a frame: fall back to MJPEG right away.
       state.streamSocketFailures += 1;
@@ -2446,6 +2530,7 @@ function startMjpegFallback(params) {
 
 function resetViewer() {
   cancelPendingTap("viewer-reset");
+  releaseAllGameKeys("viewer-reset");
   state.pendingWheelPayload = null;
   state.pendingWheelHwnd = null;
   if (state.pointerDown || state.activePointers.size) releaseActiveTouches();
@@ -3465,6 +3550,10 @@ function pointerEventDetails(event, extras = {}) {
 }
 
 function handlePointerDown(event) {
+  if (state.controlMode === "game") {
+    event.preventDefault();
+    return;
+  }
   if (state.activePointers.size === 0) state.currentGestureId = diagnosticId("gesture");
   const arms = window.PCPhoneLinkGestureArms;
   const forcedDragArm = arms.isOneFingerDragArm(state.gestureArm);
@@ -4211,6 +4300,608 @@ async function sendSpecialKey(key) {
   showGestureStatus(`Key: ${key}`);
 }
 
+function gameControlsActive() {
+  return state.controlMode === "game"
+    && state.currentDestination === "viewer"
+    && Boolean(state.selectedWindow);
+}
+
+function desiredGameKeys() {
+  const desired = new Set(state.gamePadPointers.values());
+  state.gameJoystickKeys.forEach((key) => desired.add(key));
+  return desired;
+}
+
+function syncGameHeldUi() {
+  document.querySelectorAll("[data-game-key]").forEach((button) => {
+    const held = state.gameHeldKeys.has(button.dataset.gameKey);
+    button.classList.toggle("held", held);
+    button.setAttribute("aria-pressed", String(held));
+  });
+}
+
+function resetGameJoystickUi() {
+  if (elements.gameJoystickKnob) {
+    elements.gameJoystickKnob.style.transform = "translate(-50%, -50%)";
+  }
+}
+
+function resetGameMouseUi() {
+  if (elements.gameMouseJoystickKnob) {
+    elements.gameMouseJoystickKnob.style.transform = "translate(-50%, -50%)";
+  }
+  document.querySelectorAll("[data-game-mouse-button]").forEach((button) => {
+    const held = [...state.gameMouseClickPointers.values()].some((entry) => entry.button === button.dataset.gameMouseButton);
+    button.classList.toggle("held", held);
+    button.setAttribute("aria-pressed", String(held));
+  });
+}
+
+function gameKeyPayload(action, key, reason) {
+  state.gameKeySequence += 1;
+  return {
+    action,
+    key: key || "",
+    session_id: state.gestureSessionId,
+    sequence: state.gameKeySequence,
+    reason,
+    input_style: state.gameInputStyle,
+  };
+}
+
+function sendGameKeyAction(action, key, reason, { hwnd = null, keepalive = false, handleError = true } = {}) {
+  const targetHwnd = hwnd ?? state.gameTargetHwnd ?? state.selectedWindow?.hwnd;
+  if (!state.token || targetHwnd === null || targetHwnd === undefined || !state.gestureSessionId) {
+    return Promise.resolve(null);
+  }
+  const payload = gameKeyPayload(action, key, reason);
+  const queuedAt = performance.now();
+  logGestureDiagnostic("game-key-queued", {
+    action,
+    key: key || "none",
+    input_style: state.gameInputStyle,
+    reason,
+    sequence: payload.sequence,
+    state: "queued",
+  });
+
+  const request = () => {
+    const sentAt = performance.now();
+    logGestureDiagnostic("game-key-sent", {
+      action,
+      key: key || "none",
+      input_style: state.gameInputStyle,
+      reason,
+      sequence: payload.sequence,
+      queue_wait_ms: sentAt - queuedAt,
+      state: "sending",
+    });
+    return apiFetch(`/api/windows/${targetHwnd}/game-key`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      keepalive,
+    }).then((response) => {
+      logGestureDiagnostic("game-key-ack", {
+        action,
+        key: key || "none",
+        input_style: state.gameInputStyle,
+        reason,
+        sequence: payload.sequence,
+        duration_ms: performance.now() - sentAt,
+        result: response?.applied === false ? "ignored" : "applied",
+        state: "complete",
+      });
+      return response;
+    });
+  };
+
+  let result;
+  if (keepalive) {
+    result = request();
+  } else {
+    state.gameKeyQueue = state.gameKeyQueue.catch(() => null).then(request);
+    result = state.gameKeyQueue;
+  }
+  if (!handleError) return result.catch(() => null);
+  return result.catch((error) => {
+    logGestureDiagnostic("game-key-browser-error", {
+      action,
+      key: key || "none",
+      input_style: state.gameInputStyle,
+      reason,
+      sequence: payload.sequence,
+      duration_ms: performance.now() - queuedAt,
+      error_type: error?.name || "Error",
+      result: "failed",
+      state: "release",
+    }, { immediate: true });
+    releaseAllGameKeys("request-error", { keepalive: true, forceRemote: true, hwnd: targetHwnd });
+    if (!state.gameErrorShown) {
+      state.gameErrorShown = true;
+      showToast("Game input disconnected. Movement keys released.");
+      window.setTimeout(() => { state.gameErrorShown = false; }, 1500);
+    }
+    throw error;
+  });
+}
+
+function startGameHeartbeat() {
+  if (state.gameHeartbeatTimer || !state.gameHeldKeys.size) return;
+  state.gameHeartbeatTimer = window.setInterval(() => {
+    if (!state.gameHeldKeys.size || !gameControlsActive()) {
+      releaseAllGameKeys("heartbeat-inactive");
+      return;
+    }
+    sendGameKeyAction("heartbeat", "", "held", { handleError: true }).catch(() => null);
+  }, GAME_KEY_HEARTBEAT_MS);
+}
+
+function stopGameHeartbeat() {
+  if (!state.gameHeartbeatTimer) return;
+  window.clearInterval(state.gameHeartbeatTimer);
+  state.gameHeartbeatTimer = null;
+}
+
+function syncGameKeyState(reason = "input") {
+  if (!gameControlsActive()) {
+    releaseAllGameKeys("inactive");
+    return;
+  }
+  const desired = desiredGameKeys();
+  if (desired.size && state.gameTargetHwnd === null) {
+    state.gameTargetHwnd = state.selectedWindow.hwnd;
+  }
+  const released = [...state.gameHeldKeys].filter((key) => !desired.has(key));
+  const pressed = [...desired].filter((key) => !state.gameHeldKeys.has(key));
+  state.gameHeldKeys = desired;
+  syncGameHeldUi();
+  released.forEach((key) => sendGameKeyAction("up", key, reason).catch(() => null));
+  pressed.forEach((key) => sendGameKeyAction("down", key, reason).catch(() => null));
+  if (desired.size) startGameHeartbeat();
+  else {
+    stopGameHeartbeat();
+    state.gameTargetHwnd = null;
+  }
+}
+
+function releaseAllGameKeys(reason, { keepalive = false, forceRemote = false, hwnd = null } = {}) {
+  releaseGameMouseInput(reason);
+  const targetHwnd = hwnd ?? state.gameTargetHwnd ?? state.selectedWindow?.hwnd;
+  const hadActivity = state.gameHeldKeys.size
+    || state.gamePadPointers.size
+    || state.gameJoystickPointerId !== null
+    || state.gameJoystickKeys.size;
+  state.gamePadPointers.clear();
+  state.gameJoystickPointerId = null;
+  state.gameJoystickKeys.clear();
+  state.gameHeldKeys = new Set();
+  stopGameHeartbeat();
+  resetGameJoystickUi();
+  syncGameHeldUi();
+  state.gameTargetHwnd = null;
+  if ((!hadActivity && !forceRemote) || targetHwnd === null || targetHwnd === undefined) return Promise.resolve(null);
+  logGestureDiagnostic("game-key-release-all", {
+    action: "release_all",
+    input_style: state.gameInputStyle,
+    reason,
+    state: "release",
+  }, { immediate: keepalive });
+  return sendGameKeyAction("release_all", "", reason, {
+    hwnd: targetHwnd,
+    keepalive,
+    handleError: false,
+  });
+}
+
+function beginGamePadPointer(event) {
+  if (!gameControlsActive() || state.gameInputStyle !== "pad") return;
+  const key = event.currentTarget?.dataset.gameKey;
+  if (!window.PCPhoneLinkGameControls.isMovementKey(key)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* fallback listeners still release */ }
+  state.gamePadPointers.set(event.pointerId, key);
+  logGestureDiagnostic("game-pad-pointer", {
+    action: "down",
+    key,
+    input_style: "pad",
+    pointer_type: event.pointerType || "unknown",
+    event_time_ms: Math.round(event.timeStamp || performance.now()),
+    state: "held",
+  });
+  syncGameKeyState("pad-down");
+}
+
+function finishGamePointer(event, reason = "pointer-up") {
+  let changed = false;
+  if (state.gamePadPointers.delete(event.pointerId)) changed = true;
+  if (state.gameJoystickPointerId === event.pointerId) {
+    state.gameJoystickPointerId = null;
+    state.gameJoystickKeys.clear();
+    resetGameJoystickUi();
+    changed = true;
+  }
+  if (!changed) return;
+  event.preventDefault?.();
+  event.stopPropagation?.();
+  logGestureDiagnostic("game-pointer-release", {
+    action: "up",
+    input_style: state.gameInputStyle,
+    reason,
+    pointer_type: event.pointerType || "unknown",
+    event_time_ms: Math.round(event.timeStamp || performance.now()),
+    state: "release",
+  });
+  syncGameKeyState(reason);
+}
+
+function updateGameJoystick(event) {
+  if (state.gameJoystickPointerId !== event.pointerId || !elements.gameJoystick) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const rect = elements.gameJoystick.getBoundingClientRect();
+  const radius = Math.max(Math.min(rect.width, rect.height) / 2, 1);
+  const rawX = (event.clientX - (rect.left + rect.width / 2)) / radius;
+  const rawY = (event.clientY - (rect.top + rect.height / 2)) / radius;
+  const magnitude = Math.hypot(rawX, rawY);
+  const scale = magnitude > 1 ? 1 / magnitude : 1;
+  const x = rawX * scale;
+  const y = rawY * scale;
+  const knobRadius = radius * 0.58;
+  elements.gameJoystickKnob.style.transform = `translate(calc(-50% + ${x * knobRadius}px), calc(-50% + ${y * knobRadius}px))`;
+  const previousKeys = [...state.gameJoystickKeys].join("");
+  state.gameJoystickKeys = new Set(
+    window.PCPhoneLinkGameControls.keysForJoystick(x, y, GAME_JOYSTICK_DEADZONE),
+  );
+  const now = performance.now();
+  const keysChanged = previousKeys !== [...state.gameJoystickKeys].join("");
+  if (keysChanged || now - state.lastGameMoveLoggedAt >= 120) {
+    state.lastGameMoveLoggedAt = now;
+    logGestureDiagnostic("game-joystick-move", {
+      action: "move",
+      input_style: "joystick",
+      x,
+      y,
+      event_time_ms: Math.round(event.timeStamp || now),
+      state: state.gameJoystickKeys.size ? "held" : "deadzone",
+    });
+  }
+  syncGameKeyState("joystick-move");
+}
+
+function beginGameJoystick(event) {
+  if (!gameControlsActive() || state.gameInputStyle !== "joystick" || state.gameJoystickPointerId !== null) return;
+  event.preventDefault();
+  event.stopPropagation();
+  state.gameJoystickPointerId = event.pointerId;
+  try { elements.gameJoystick.setPointerCapture(event.pointerId); } catch { /* fallback listeners still release */ }
+  updateGameJoystick(event);
+}
+
+function gameMousePointerPayload(action, { deltaX = 0, deltaY = 0 } = {}) {
+  state.pointerSequence += 1;
+  return {
+    action,
+    x: 0.5,
+    y: 0.5,
+    delta: 0,
+    delta_x: deltaX,
+    delta_y: deltaY,
+    request_id: diagnosticId("request"),
+    session_id: state.gestureSessionId,
+    gesture_id: diagnosticId("game-mouse"),
+    control_mode: "game",
+    pointer_count: state.gamePadPointers.size + (state.gameJoystickPointerId === null ? 0 : 1)
+      + (state.gameMousePointerId === null ? 0 : 1) + state.gameMouseClickPointers.size,
+    pointer_type: "touch",
+    shortcut: "game-mouse",
+    sequence: state.pointerSequence,
+    coalesced_count: 1,
+    client_queued_at_ms: Math.round(performance.timeOrigin + performance.now()),
+  };
+}
+
+function showGameMouseError() {
+  if (state.gameErrorShown) return;
+  state.gameErrorShown = true;
+  showToast("Game mouse disconnected. Mouse control stopped.");
+  window.setTimeout(() => { state.gameErrorShown = false; }, 1500);
+}
+
+function stopGameMouseJoystick(reason, { clearClicks = false } = {}) {
+  const wasActive = state.gameMousePointerId !== null
+    || state.gameMouseVector.magnitude > 0
+    || state.gameMouseFrame !== null
+    || state.gameMouseMoveInFlight
+    || state.pendingGameMouseMove;
+  state.gameMouseGeneration += 1;
+  state.gameMouseAbortController?.abort();
+  state.gameMouseAbortController = null;
+  if (state.gameMouseFrame !== null) window.cancelAnimationFrame(state.gameMouseFrame);
+  state.gameMouseFrame = null;
+  state.gameMouseLastFrameAt = 0;
+  state.gameMousePointerId = null;
+  state.gameMouseVector = { x: 0, y: 0, magnitude: 0 };
+  state.gameMouseMoveInFlight = false;
+  state.pendingGameMouseMove = null;
+  state.gameMouseTargetHwnd = null;
+  if (clearClicks) state.gameMouseClickPointers.clear();
+  resetGameMouseUi();
+  if (wasActive) {
+    logGestureDiagnostic("game-mouse-stop", {
+      action: "move_relative",
+      mode: "mouse-joystick",
+      reason,
+      state: "neutral",
+    }, { immediate: reason !== "pointer-up" });
+  }
+}
+
+function releaseGameMouseInput(reason) {
+  const hadClicks = state.gameMouseClickPointers.size > 0;
+  state.gameMouseClickGeneration += 1;
+  stopGameMouseJoystick(reason, { clearClicks: true });
+  if (hadClicks) {
+    logGestureDiagnostic("game-mouse-click-cancel", {
+      action: "cancel",
+      mode: "mouse-buttons",
+      reason,
+      state: "released",
+    });
+  }
+}
+
+function flushGameMouseMove() {
+  if (state.gameMouseMoveInFlight || !state.pendingGameMouseMove || !gameControlsActive()) return;
+  const pending = state.pendingGameMouseMove;
+  state.pendingGameMouseMove = null;
+  const generation = state.gameMouseGeneration;
+  const targetHwnd = state.gameMouseTargetHwnd ?? state.selectedWindow?.hwnd;
+  if (targetHwnd === null || targetHwnd === undefined) return;
+  const payload = gameMousePointerPayload("move_relative", pending);
+  const queuedAt = performance.now();
+  const controller = new AbortController();
+  state.gameMouseAbortController = controller;
+  state.gameMouseMoveInFlight = true;
+  logGestureDiagnostic("game-mouse-move-sent", {
+    action: "move_relative",
+    mode: "mouse-joystick",
+    request_id: payload.request_id,
+    sequence: payload.sequence,
+    delta_x: payload.delta_x,
+    delta_y: payload.delta_y,
+    state: "sending",
+  });
+  apiFetch(`/api/windows/${targetHwnd}/pointer`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal: controller.signal,
+  }).then((response) => {
+    if (generation !== state.gameMouseGeneration) return;
+    handlePointerResponse(response, payload.action);
+    logGestureDiagnostic("game-mouse-move-ack", {
+      action: "move_relative",
+      mode: "mouse-joystick",
+      request_id: payload.request_id,
+      sequence: payload.sequence,
+      duration_ms: performance.now() - queuedAt,
+      result: "ok",
+      state: "complete",
+    });
+  }).catch((error) => {
+    if (error?.name === "AbortError" || generation !== state.gameMouseGeneration) return;
+    logGestureDiagnostic("game-mouse-error", {
+      action: "move_relative",
+      mode: "mouse-joystick",
+      request_id: payload.request_id,
+      sequence: payload.sequence,
+      duration_ms: performance.now() - queuedAt,
+      error_type: error?.name || "Error",
+      reason: "request-error",
+      result: "failed",
+      state: "neutral",
+    }, { immediate: true });
+    releaseGameMouseInput("request-error");
+    showGameMouseError();
+  }).finally(() => {
+    if (generation !== state.gameMouseGeneration) return;
+    state.gameMouseAbortController = null;
+    state.gameMouseMoveInFlight = false;
+    if (state.pendingGameMouseMove && state.gameMouseVector.magnitude > 0) flushGameMouseMove();
+  });
+}
+
+function queueGameMouseMove(deltaX, deltaY) {
+  if (!gameControlsActive() || state.gameMousePointerId === null || state.gameMouseVector.magnitude === 0) return;
+  state.pendingGameMouseMove = { deltaX, deltaY };
+  flushGameMouseMove();
+}
+
+function runGameMouseFrame(now) {
+  state.gameMouseFrame = null;
+  if (!gameControlsActive() || state.gameMousePointerId === null || state.gameMouseVector.magnitude === 0) return;
+  if (!state.gameMouseLastFrameAt) state.gameMouseLastFrameAt = now;
+  const elapsed = Math.min(Math.max(now - state.gameMouseLastFrameAt, 0), 50);
+  if (elapsed >= GAME_MOUSE_FRAME_MS) {
+    state.gameMouseLastFrameAt = now;
+    const distance = GAME_MOUSE_MAX_SPEED_PX_PER_SECOND * (elapsed / 1000);
+    queueGameMouseMove(state.gameMouseVector.x * distance, state.gameMouseVector.y * distance);
+  }
+  state.gameMouseFrame = window.requestAnimationFrame(runGameMouseFrame);
+}
+
+function startGameMouseFrames() {
+  if (state.gameMouseFrame !== null || state.gameMouseVector.magnitude === 0) return;
+  state.gameMouseLastFrameAt = performance.now();
+  state.gameMouseFrame = window.requestAnimationFrame(runGameMouseFrame);
+}
+
+function updateGameMouseJoystick(event) {
+  if (state.gameMousePointerId !== event.pointerId || !elements.gameMouseJoystick) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const rect = elements.gameMouseJoystick.getBoundingClientRect();
+  const radius = Math.max(Math.min(rect.width, rect.height) / 2, 1);
+  const rawX = (event.clientX - (rect.left + rect.width / 2)) / radius;
+  const rawY = (event.clientY - (rect.top + rect.height / 2)) / radius;
+  const magnitude = Math.hypot(rawX, rawY);
+  const scale = magnitude > 1 ? 1 / magnitude : 1;
+  const x = rawX * scale;
+  const y = rawY * scale;
+  const knobRadius = radius * 0.56;
+  elements.gameMouseJoystickKnob.style.transform = `translate(calc(-50% + ${x * knobRadius}px), calc(-50% + ${y * knobRadius}px))`;
+  const previousMagnitude = state.gameMouseVector.magnitude;
+  state.gameMouseVector = window.PCPhoneLinkGameControls.mouseVectorForJoystick(x, y, GAME_MOUSE_DEADZONE);
+  const now = performance.now();
+  if ((previousMagnitude === 0) !== (state.gameMouseVector.magnitude === 0) || now - state.lastGameMouseMoveLoggedAt >= 120) {
+    state.lastGameMouseMoveLoggedAt = now;
+    logGestureDiagnostic("game-mouse-vector", {
+      action: "move_relative",
+      mode: "mouse-joystick",
+      x: state.gameMouseVector.x,
+      y: state.gameMouseVector.y,
+      event_time_ms: Math.round(event.timeStamp || now),
+      state: state.gameMouseVector.magnitude > 0 ? "active" : "deadzone",
+    });
+  }
+  if (state.gameMouseVector.magnitude > 0) startGameMouseFrames();
+  else {
+    state.gameMouseGeneration += 1;
+    state.gameMouseAbortController?.abort();
+    state.gameMouseAbortController = null;
+    state.gameMouseMoveInFlight = false;
+    state.pendingGameMouseMove = null;
+    if (state.gameMouseFrame !== null) window.cancelAnimationFrame(state.gameMouseFrame);
+    state.gameMouseFrame = null;
+    state.gameMouseLastFrameAt = 0;
+  }
+}
+
+function beginGameMouseJoystick(event) {
+  if (!gameControlsActive() || state.gameMousePointerId !== null) return;
+  event.preventDefault();
+  event.stopPropagation();
+  state.gameMousePointerId = event.pointerId;
+  state.gameMouseTargetHwnd = state.selectedWindow.hwnd;
+  try { elements.gameMouseJoystick.setPointerCapture(event.pointerId); } catch { /* window fallback releases */ }
+  updateGameMouseJoystick(event);
+}
+
+function finishGameMouseJoystick(event, reason = "pointer-up") {
+  if (state.gameMousePointerId !== event.pointerId) return;
+  event.preventDefault?.();
+  event.stopPropagation?.();
+  stopGameMouseJoystick(reason);
+}
+
+function gameMouseClickAction(button) {
+  if (button === "left") return "click_current";
+  if (button === "middle") return "middle_click_current";
+  if (button === "right") return "right_click_current";
+  return null;
+}
+
+function sendGameMouseClick(button, targetHwnd, reason) {
+  const action = gameMouseClickAction(button);
+  if (!action || targetHwnd === null || targetHwnd === undefined || !state.token) return Promise.resolve(null);
+  const payload = gameMousePointerPayload(action);
+  const generation = state.gameMouseClickGeneration;
+  const queuedAt = performance.now();
+  logGestureDiagnostic("game-mouse-click-queued", {
+    action,
+    mode: "mouse-buttons",
+    reason,
+    request_id: payload.request_id,
+    sequence: payload.sequence,
+    state: "queued",
+  });
+  state.gameMouseClickQueue = state.gameMouseClickQueue.catch(() => null).then(() => {
+    if (generation !== state.gameMouseClickGeneration) return null;
+    const sentAt = performance.now();
+    logGestureDiagnostic("game-mouse-click-sent", {
+      action,
+      mode: "mouse-buttons",
+      reason,
+      request_id: payload.request_id,
+      sequence: payload.sequence,
+      queue_wait_ms: sentAt - queuedAt,
+      state: "sending",
+    });
+    return apiFetch(`/api/windows/${targetHwnd}/pointer`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }).then((response) => {
+      if (generation !== state.gameMouseClickGeneration) return response;
+      handlePointerResponse(response, action);
+      logGestureDiagnostic("game-mouse-click-ack", {
+        action,
+        mode: "mouse-buttons",
+        request_id: payload.request_id,
+        sequence: payload.sequence,
+        duration_ms: performance.now() - sentAt,
+        result: "ok",
+        state: "complete",
+      });
+      return response;
+    });
+  });
+  return state.gameMouseClickQueue.catch((error) => {
+    if (generation !== state.gameMouseClickGeneration) return null;
+    logGestureDiagnostic("game-mouse-error", {
+      action,
+      mode: "mouse-buttons",
+      request_id: payload.request_id,
+      sequence: payload.sequence,
+      duration_ms: performance.now() - queuedAt,
+      error_type: error?.name || "Error",
+      reason: "click-error",
+      result: "failed",
+      state: "released",
+    }, { immediate: true });
+    releaseGameMouseInput("click-error");
+    showGameMouseError();
+    throw error;
+  });
+}
+
+function beginGameMouseClick(event) {
+  if (!gameControlsActive()) return;
+  const button = event.currentTarget?.dataset.gameMouseButton;
+  if (!gameMouseClickAction(button)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* window fallback releases */ }
+  state.gameMouseClickPointers.set(event.pointerId, { button, targetHwnd: state.selectedWindow.hwnd });
+  resetGameMouseUi();
+  logGestureDiagnostic("game-mouse-click-pointer", {
+    action: "down",
+    mode: "mouse-buttons",
+    reason: button,
+    pointer_type: event.pointerType || "unknown",
+    event_time_ms: Math.round(event.timeStamp || performance.now()),
+    state: "armed",
+  });
+}
+
+function finishGameMouseClick(event, reason = "pointer-up", { activate = false } = {}) {
+  const entry = state.gameMouseClickPointers.get(event.pointerId);
+  if (!entry) return;
+  state.gameMouseClickPointers.delete(event.pointerId);
+  event.preventDefault?.();
+  event.stopPropagation?.();
+  resetGameMouseUi();
+  if (activate && gameControlsActive() && state.selectedWindow?.hwnd === entry.targetHwnd) {
+    sendGameMouseClick(entry.button, entry.targetHwnd, reason).catch(() => null);
+  } else {
+    logGestureDiagnostic("game-mouse-click-cancel", {
+      action: "cancel",
+      mode: "mouse-buttons",
+      reason,
+      state: "released",
+    });
+  }
+}
+
 function handleTextSubmit(event) {
   event.preventDefault();
   if (state.voiceListening && state.voiceRecognition) {
@@ -4222,6 +4913,7 @@ function handleTextSubmit(event) {
 function openDestination(destination, { toggle = false } = {}) {
   cancelPendingTap("navigation");
   const next = toggle && state.currentDestination === destination ? "viewer" : destination;
+  if (next !== state.currentDestination) releaseAllGameKeys("destination-change");
   if (next === "viewer" && state.currentDestination !== "viewer"
     && (state.pointerDown || state.activePointers.size || state.twoFingerGesture)) {
     releaseActiveTouches();
@@ -4249,6 +4941,7 @@ function openDestination(destination, { toggle = false } = {}) {
   document.querySelectorAll("[data-destination]").forEach((button) => {
     button.classList.toggle("active", button.dataset.destination === next);
   });
+  syncGameControlsUi();
   renderBottomNav();
   if (history.replaceState) history.replaceState(null, "", `#${next}`);
 }
@@ -4380,6 +5073,9 @@ elements.applyFitShape.addEventListener("click", () => applyPhoneFit("shape-butt
 if (elements.controlMode) {
   elements.controlMode.addEventListener("change", (event) => setControlMode(event.target.value));
 }
+if (elements.gameInputStyle) {
+  elements.gameInputStyle.addEventListener("change", (event) => setGameInputStyle(event.target.value));
+}
 if (elements.followMouse) {
   elements.followMouse.addEventListener("change", (event) => {
     state.followMouse = event.target.checked;
@@ -4442,6 +5138,42 @@ elements.touchLayer.addEventListener("pointermove", handlePointerMove, { passive
 elements.touchLayer.addEventListener("pointerup", handlePointerUp, { passive: false });
 elements.touchLayer.addEventListener("pointercancel", handlePointerCancel, { passive: false });
 elements.touchLayer.addEventListener("contextmenu", (event) => event.preventDefault());
+document.querySelectorAll("[data-game-key]").forEach((button) => {
+  button.addEventListener("pointerdown", beginGamePadPointer, { passive: false });
+  button.addEventListener("pointerup", (event) => finishGamePointer(event, "pointer-up"), { passive: false });
+  button.addEventListener("pointercancel", (event) => finishGamePointer(event, "pointer-cancel"), { passive: false });
+  button.addEventListener("lostpointercapture", (event) => finishGamePointer(event, "lost-capture"), { passive: false });
+  button.addEventListener("contextmenu", (event) => event.preventDefault());
+});
+elements.gameJoystick?.addEventListener("pointerdown", beginGameJoystick, { passive: false });
+elements.gameJoystick?.addEventListener("pointermove", updateGameJoystick, { passive: false });
+elements.gameJoystick?.addEventListener("pointerup", (event) => finishGamePointer(event, "pointer-up"), { passive: false });
+elements.gameJoystick?.addEventListener("pointercancel", (event) => finishGamePointer(event, "pointer-cancel"), { passive: false });
+elements.gameJoystick?.addEventListener("lostpointercapture", (event) => finishGamePointer(event, "lost-capture"), { passive: false });
+elements.gameJoystick?.addEventListener("contextmenu", (event) => event.preventDefault());
+elements.gameMouseJoystick?.addEventListener("pointerdown", beginGameMouseJoystick, { passive: false });
+elements.gameMouseJoystick?.addEventListener("pointermove", updateGameMouseJoystick, { passive: false });
+elements.gameMouseJoystick?.addEventListener("pointerup", (event) => finishGameMouseJoystick(event, "pointer-up"), { passive: false });
+elements.gameMouseJoystick?.addEventListener("pointercancel", (event) => finishGameMouseJoystick(event, "pointer-cancel"), { passive: false });
+elements.gameMouseJoystick?.addEventListener("lostpointercapture", (event) => finishGameMouseJoystick(event, "lost-capture"), { passive: false });
+elements.gameMouseJoystick?.addEventListener("contextmenu", (event) => event.preventDefault());
+document.querySelectorAll("[data-game-mouse-button]").forEach((button) => {
+  button.addEventListener("pointerdown", beginGameMouseClick, { passive: false });
+  button.addEventListener("pointerup", (event) => finishGameMouseClick(event, "pointer-up", { activate: true }), { passive: false });
+  button.addEventListener("pointercancel", (event) => finishGameMouseClick(event, "pointer-cancel"), { passive: false });
+  button.addEventListener("lostpointercapture", (event) => finishGameMouseClick(event, "lost-capture"), { passive: false });
+  button.addEventListener("contextmenu", (event) => event.preventDefault());
+});
+window.addEventListener("pointerup", (event) => {
+  finishGamePointer(event, "window-pointer-up");
+  finishGameMouseJoystick(event, "window-pointer-up");
+  finishGameMouseClick(event, "window-pointer-up", { activate: true });
+}, { passive: false });
+window.addEventListener("pointercancel", (event) => {
+  finishGamePointer(event, "window-pointer-cancel");
+  finishGameMouseJoystick(event, "window-pointer-cancel");
+  finishGameMouseClick(event, "window-pointer-cancel");
+}, { passive: false });
 
 document.addEventListener("click", (event) => {
   const pointerShortcut = event.target.closest("[data-pointer-shortcut]");
@@ -4548,17 +5280,23 @@ function emergencyTouchCancel(reason) {
     keepalive: true,
   }).catch(() => null);
 }
-window.addEventListener("blur", releaseActiveTouches);
+window.addEventListener("blur", () => {
+  releaseAllGameKeys("window-blur", { keepalive: true });
+  releaseActiveTouches();
+});
 window.addEventListener("pagehide", () => {
   emergencyTouchCancel("pagehide");
+  releaseAllGameKeys("pagehide", { keepalive: true });
   releaseActiveTouches();
   logGestureDiagnostic("lifecycle-release", { reason: "pagehide", state: "reset" }, { immediate: true, force: true });
   flushGestureDiagnostics({ keepalive: true });
 });
 window.addEventListener("error", () => {
+  releaseAllGameKeys("browser-error", { keepalive: true });
   logGestureDiagnostic("browser-error", { error_type: "ErrorEvent", reason: "uncaught", state: "failed" }, { immediate: true, force: true });
 });
 window.addEventListener("unhandledrejection", (event) => {
+  releaseAllGameKeys("promise-error", { keepalive: true });
   logGestureDiagnostic("browser-error", {
     error_type: event.reason?.name || "PromiseRejection",
     reason: "unhandled-rejection",
@@ -4571,6 +5309,11 @@ window.addEventListener("online", () => {
   if (state.token) bootstrap({ quiet: true });
 });
 document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") {
+    releaseAllGameKeys("visibility-hidden", { keepalive: true });
+    releaseActiveTouches();
+    return;
+  }
   if (document.visibilityState === "visible" && state.token && !state.hostReconnectTimer) {
     bootstrap({ quiet: true });
   }
@@ -4578,6 +5321,7 @@ document.addEventListener("visibilitychange", () => {
 
 window.addEventListener("resize", () => {
   syncViewportLayout();
+  syncGameControlsUi();
   scheduleKeyboardComposerSync(60);
   if (state.selectedWindow) {
     scheduleStreamRefresh();

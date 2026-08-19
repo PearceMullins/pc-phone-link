@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import io
+import re
 import threading
 import time
 import winreg
@@ -19,7 +20,7 @@ import win32ui
 from PIL import Image, ImageDraw, ImageFont, ImageGrab
 
 from .logging_utils import log_event
-from .gesture_diagnostics import log_gesture
+from .gesture_diagnostics import gesture_context, log_gesture
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
@@ -54,6 +55,7 @@ POINTER_FLAG_CANCELED = 0x00008000
 TOUCH_MASK_CONTACTAREA = 0x00000001
 TOUCH_FEEDBACK_DEFAULT = 0x00000001
 TOUCH_CURSOR_GUARD_MAX_SECONDS = 15.0
+GAME_KEY_LEASE_SECONDS = 2.0
 
 send_message_timeout = user32.SendMessageTimeoutW
 send_message_timeout.argtypes = [
@@ -147,6 +149,11 @@ _touch_cursor_previous_clip: tuple[int, int, int, int] | None = None
 _touch_cursor_clip_locked = False
 _touch_cursor_settle_stop: threading.Event | None = None
 _touch_cursor_settle_thread: threading.Thread | None = None
+_game_key_lock = threading.RLock()
+_game_keys_by_session: dict[str, set[int]] = {}
+_game_key_owners: dict[int, set[str]] = {}
+_game_key_timers: dict[str, threading.Timer] = {}
+_game_session_sequence: dict[str, int] = {}
 
 
 class KEYBDINPUT(ctypes.Structure):
@@ -254,6 +261,13 @@ SPECIAL_KEYS: dict[str, int] = {
     "tab": win32con.VK_TAB,
     "up": win32con.VK_UP,
 }
+GAME_MOVEMENT_KEYS: dict[str, int] = {
+    "w": 0x57,
+    "a": 0x41,
+    "s": 0x53,
+    "d": 0x44,
+}
+_GAME_SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
 PHONE_FIT_SNAPSHOTS: dict[int, PhoneFitSnapshot] = {}
 
@@ -639,13 +653,17 @@ def _handle_pointer_impl(
         focus_window(ensured)
         _mouse_click("right")
         return
+    if action == "middle_click_current":
+        focus_window(ensured)
+        _mouse_click("middle")
+        return
     if action == "wheel_current":
         focus_window(ensured)
         wheel_amount = delta if delta else 120
         win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0, wheel_amount, 0)
         return
 
-    if action in {"tap", "double", "right_tap", "down", "up", "wheel"}:
+    if action in {"tap", "double", "right_tap", "middle_tap", "down", "up", "wheel"}:
         focus_window(ensured)
 
     _move_cursor_to_window_point(ensured, clamped_x, clamped_y)
@@ -662,6 +680,9 @@ def _handle_pointer_impl(
         return
     if action == "right_tap":
         _mouse_click("right")
+        return
+    if action == "middle_tap":
+        _mouse_click("middle")
         return
     if action == "down":
         _mouse_down("left")
@@ -711,12 +732,15 @@ def _handle_fullscreen_pointer(
     if action == "right_click_current":
         _mouse_click("right")
         return
+    if action == "middle_click_current":
+        _mouse_click("middle")
+        return
     if action == "wheel_current":
         wheel_amount = delta if delta else 120
         win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0, wheel_amount, 0)
         return
 
-    if action in {"tap", "double", "right_tap", "down", "up", "wheel", "move"}:
+    if action in {"tap", "double", "right_tap", "middle_tap", "down", "up", "wheel", "move"}:
         _move_cursor_to_bounds_point(bounds, clamped_x, clamped_y)
 
     if action == "move":
@@ -731,6 +755,9 @@ def _handle_fullscreen_pointer(
         return
     if action == "right_tap":
         _mouse_click("right")
+        return
+    if action == "middle_tap":
+        _mouse_click("middle")
         return
     if action == "down":
         _mouse_down("left")
@@ -778,6 +805,177 @@ def press_special_key(hwnd: int, key_name: str) -> None:
         "special-key-pressed",
         {"hwnd": hwnd, "key": normalized},
     )
+
+
+def handle_game_key(
+    hwnd: int,
+    action: str,
+    key_name: str,
+    session_id: str,
+    sequence: int,
+    *,
+    input_style: str = "pad",
+) -> bool:
+    """Apply one leased WASD key transition and ignore stale client requests."""
+    normalized_action = action.strip().lower()
+    normalized_key = key_name.strip().lower()
+    normalized_session = session_id.strip()
+    if not _GAME_SESSION_ID.fullmatch(normalized_session):
+        raise ValueError("A valid game input session is required.")
+    if normalized_action not in {"down", "up", "heartbeat", "release_all"}:
+        raise ValueError(f"Unsupported game key action: {action}")
+    if normalized_action in {"down", "up"} and normalized_key not in GAME_MOVEMENT_KEYS:
+        raise ValueError(f"Unsupported game movement key: {key_name}")
+
+    safe_style = input_style if input_style in {"pad", "joystick"} else "unknown"
+    safe_key = normalized_key if normalized_key in GAME_MOVEMENT_KEYS else "none"
+    context = {
+        "session_id": normalized_session,
+        "sequence": sequence,
+        "action": normalized_action,
+        "key": safe_key,
+        "input_style": safe_style,
+        "target": "desktop" if _is_fullscreen_target(hwnd) else "window",
+    }
+    with gesture_context(context):
+        log_gesture("game-key-host-start", {"state": "dispatch"})
+        try:
+            with _game_key_lock:
+                last_sequence = _game_session_sequence.get(normalized_session, -1)
+                if sequence <= last_sequence:
+                    log_gesture("game-key-host-result", {"result": "stale", "state": "ignored"})
+                    return False
+                _game_session_sequence[normalized_session] = sequence
+
+                if normalized_action == "release_all":
+                    released = _release_game_session_locked(normalized_session)
+                    log_gesture(
+                        "game-key-host-result",
+                        {"result": "released", "state": "idle", "queue_depth": released},
+                    )
+                    return bool(released)
+
+                if normalized_action == "heartbeat":
+                    held = _game_keys_by_session.get(normalized_session, set())
+                    if held:
+                        _renew_game_key_lease_locked(normalized_session, sequence)
+                    log_gesture(
+                        "game-key-host-result",
+                        {"result": "renewed" if held else "idle", "state": "held" if held else "idle"},
+                    )
+                    return bool(held)
+
+                virtual_key = GAME_MOVEMENT_KEYS[normalized_key]
+                if normalized_action == "down":
+                    if not _is_fullscreen_target(hwnd):
+                        focus_window(hwnd)
+                    held = _game_keys_by_session.setdefault(normalized_session, set())
+                    owners = _game_key_owners.setdefault(virtual_key, set())
+                    if virtual_key not in held:
+                        if not owners:
+                            _emit_game_key(virtual_key, down=True)
+                        held.add(virtual_key)
+                        owners.add(normalized_session)
+                    _renew_game_key_lease_locked(normalized_session, sequence)
+                    result = "pressed"
+                else:
+                    held = _game_keys_by_session.get(normalized_session, set())
+                    owners = _game_key_owners.get(virtual_key, set())
+                    if virtual_key in held:
+                        held.remove(virtual_key)
+                        owners.discard(normalized_session)
+                        if not owners:
+                            _emit_game_key(virtual_key, down=False)
+                            _game_key_owners.pop(virtual_key, None)
+                    if held:
+                        _renew_game_key_lease_locked(normalized_session, sequence)
+                    else:
+                        _game_keys_by_session.pop(normalized_session, None)
+                        timer = _game_key_timers.pop(normalized_session, None)
+                        if timer:
+                            timer.cancel()
+                    result = "released"
+                log_gesture("game-key-host-result", {"result": result, "state": "held" if held else "idle"})
+                return True
+        except Exception as error:
+            log_gesture(
+                "game-key-host-error",
+                {"error_type": type(error).__name__, "result": "failed", "state": "release"},
+                level="error",
+            )
+            release_all_game_keys(session_id=normalized_session, reason="error")
+            raise
+
+
+def release_all_game_keys(session_id: str | None = None, *, reason: str = "lifecycle") -> int:
+    """Release held movement keys for one client or every client."""
+    with _game_key_lock:
+        if session_id is not None:
+            normalized_session = session_id.strip()
+            if not _GAME_SESSION_ID.fullmatch(normalized_session):
+                return 0
+            released = _release_game_session_locked(normalized_session)
+        else:
+            released = sum(_release_game_session_locked(value) for value in list(_game_keys_by_session))
+            for timer in _game_key_timers.values():
+                timer.cancel()
+            _game_key_timers.clear()
+            _game_session_sequence.clear()
+    log_gesture(
+        "game-key-host-release-all",
+        {"reason": reason, "queue_depth": released, "result": "released", "state": "idle"},
+    )
+    return released
+
+
+def _emit_game_key(virtual_key: int, *, down: bool) -> None:
+    flags = 0 if down else win32con.KEYEVENTF_KEYUP
+    win32api.keybd_event(virtual_key, 0, flags, 0)
+
+
+def _renew_game_key_lease_locked(session_id: str, sequence: int) -> None:
+    previous = _game_key_timers.pop(session_id, None)
+    if previous:
+        previous.cancel()
+    timer = threading.Timer(GAME_KEY_LEASE_SECONDS, _expire_game_key_lease, args=(session_id, sequence))
+    timer.daemon = True
+    _game_key_timers[session_id] = timer
+    timer.start()
+
+
+def _expire_game_key_lease(session_id: str, expected_sequence: int) -> None:
+    with _game_key_lock:
+        if _game_session_sequence.get(session_id) != expected_sequence:
+            return
+        released = _release_game_session_locked(session_id)
+    log_gesture(
+        "game-key-host-lease-expired",
+        {
+            "session_id": session_id,
+            "sequence": expected_sequence,
+            "reason": "lease-expired",
+            "queue_depth": released,
+            "result": "released",
+            "state": "idle",
+        },
+    )
+
+
+def _release_game_session_locked(session_id: str) -> int:
+    timer = _game_key_timers.pop(session_id, None)
+    if timer:
+        timer.cancel()
+    held = _game_keys_by_session.pop(session_id, set())
+    released = 0
+    for virtual_key in held:
+        owners = _game_key_owners.get(virtual_key, set())
+        owners.discard(session_id)
+        if owners:
+            continue
+        _game_key_owners.pop(virtual_key, None)
+        _emit_game_key(virtual_key, down=False)
+        released += 1
+    return released
 
 
 def get_system_text_scale() -> int:
@@ -1525,9 +1723,11 @@ def _get_cursor_state(window_bounds: tuple[int, int, int, int]) -> dict[str, Any
 
 
 def _mouse_click(button: str) -> None:
-    _mouse_down(button)
-    time.sleep(0.015)
-    _mouse_up(button)
+    try:
+        _mouse_down(button)
+        time.sleep(0.015)
+    finally:
+        _mouse_up(button)
 
 
 def _mouse_down(button: str) -> None:
@@ -1536,6 +1736,9 @@ def _mouse_down(button: str) -> None:
         return
     if button == "right":
         win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+        return
+    if button == "middle":
+        win32api.mouse_event(win32con.MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0)
         return
     raise ValueError(f"Unsupported mouse button: {button}")
 
@@ -1546,6 +1749,9 @@ def _mouse_up(button: str) -> None:
         return
     if button == "right":
         win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+        return
+    if button == "middle":
+        win32api.mouse_event(win32con.MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0)
         return
     raise ValueError(f"Unsupported mouse button: {button}")
 

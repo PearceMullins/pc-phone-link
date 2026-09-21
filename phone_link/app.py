@@ -845,25 +845,37 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--log-level",
-        default="info",
+        default=None,
         choices=("critical", "error", "warning", "info", "debug", "trace"),
         help=(
             "Console log level for the host server. Per-request console lines are hidden at "
-            "warning or above; event logs still record to the PC Phone Link log folder."
+            "warning or above; event logs still record to the PC Phone Link log folder. "
+            "Defaults to warning (quiet) unless --verbose is used."
         ),
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show per-request console lines (same as --log-level info).",
     )
     parser.add_argument(
         "--quiet",
         action="store_true",
-        help="Shortcut for --log-level warning: hides per-request console lines.",
+        help="Keep per-request console lines hidden (the default).",
     )
     return parser
 
 
 def _resolve_console_logging(args: argparse.Namespace) -> tuple[str, bool]:
-    level = "warning" if args.quiet else str(args.log_level).strip().lower()
-    if level not in UVICORN_LOG_LEVELS:
+    explicit_level = getattr(args, "log_level", None)
+    if explicit_level:
+        level = str(explicit_level).strip().lower()
+    elif getattr(args, "verbose", False):
         level = "info"
+    else:
+        level = "warning"
+    if level not in UVICORN_LOG_LEVELS:
+        level = "warning"
     return level, level in {"info", "debug", "trace"}
 
 
@@ -914,7 +926,8 @@ def main() -> int:
         print("Power on from the phone will use this wake relay endpoint:")
         print(f"  {wake_relay_url}")
     if not console_access_log:
-        print("Per-request console logging is off. Event logs still record to the PC Phone Link log folder.")
+        print("Per-request console logging is off. Run with --verbose to show it.")
+        print("Event logs still record to the PC Phone Link log folder.")
     print("=" * 72)
 
     log_event(

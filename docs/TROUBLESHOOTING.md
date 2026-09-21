@@ -54,6 +54,22 @@ Common problems and fixes for PC Phone Link.
 3. Lower FPS and resolution in stream settings
 4. Check logs for capture permission or `blocked` diagnostics
 
+## Console does not show every request
+
+The host console is quiet by default: it prints the access URLs and connect code, then stays silent so per-request logging cannot slow down pointer input. Every request is still written to `%LOCALAPPDATA%\PC Phone Link\logs\host-events.jsonl`.
+
+Run `python run_phone_link.py --verbose` (or `--log-level info`) when you want per-request lines on the console.
+
+## Stream shows only part of the desktop or the pointer stops partway
+
+If the phone stream looks zoomed into the top-left of the PC, or the cursor drawn on the stream stops moving down even though taps work, the PC display resolution or scaling changed while the host was running.
+
+**Fixes:**
+
+1. Update to the current version — the host now declares per-monitor DPI awareness, so Windows metrics, cursor position, and screen capture stay in physical pixels at any resolution or display scale
+2. Restart the host once after a resolution or scale change if you are running an older build; no restart is needed on current builds
+3. Phone Fit stores the window bounds before resizing, and restore now clamps those old bounds onto the current screen, so windows cannot come back off-screen after a resolution change
+
 ## Voice input unavailable
 
 **Message:** Voice input needs HTTPS or localhost.

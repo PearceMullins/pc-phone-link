@@ -57,6 +57,9 @@ POINTER_FLAG_CANCELED = 0x00008000
 TOUCH_MASK_CONTACTAREA = 0x00000001
 TOUCH_FEEDBACK_DEFAULT = 0x00000001
 TOUCH_CURSOR_GUARD_MAX_SECONDS = 15.0
+PER_MONITOR_DPI_AWARE = 2
+DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
+_DPI_AWARENESS_READY = False
 GAME_KEY_LEASE_SECONDS = 2.0
 
 send_message_timeout = user32.SendMessageTimeoutW
@@ -70,6 +73,34 @@ send_message_timeout.argtypes = [
     ctypes.POINTER(ULONG_PTR),
 ]
 send_message_timeout.restype = wintypes.LPARAM
+
+
+def enable_dpi_awareness() -> bool:
+    """Keep Win32 metrics, cursor, and captures in real pixels at any display scale."""
+    global _DPI_AWARENESS_READY
+    if _DPI_AWARENESS_READY:
+        return True
+    _DPI_AWARENESS_READY = True
+
+    try:
+        if user32.SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2):
+            return True
+    except (AttributeError, OSError, ctypes.ArgumentError):
+        pass
+
+    try:
+        if ctypes.windll.shcore.SetProcessDpiAwareness(PER_MONITOR_DPI_AWARE) == 0:
+            return True
+    except (AttributeError, OSError, ctypes.ArgumentError):
+        pass
+
+    try:
+        return bool(user32.SetProcessDPIAware())
+    except (AttributeError, OSError, ctypes.ArgumentError):
+        return False
+
+
+enable_dpi_awareness()
 
 
 class WindowLookupError(RuntimeError):
@@ -455,15 +486,15 @@ def restore_window(hwnd: int) -> None:
         if snapshot.was_maximized:
             win32gui.ShowWindow(ensured, win32con.SW_MAXIMIZE)
         else:
-            left, top, right, bottom = snapshot.bounds
+            left, top, width, height = _clamp_bounds_to_virtual_screen(snapshot.bounds)
             win32gui.ShowWindow(ensured, win32con.SW_RESTORE)
             win32gui.SetWindowPos(
                 ensured,
                 win32con.HWND_TOP,
                 left,
                 top,
-                max(right - left, 1),
-                max(bottom - top, 1),
+                width,
+                height,
                 win32con.SWP_SHOWWINDOW,
             )
         _force_foreground(ensured)
@@ -1232,6 +1263,19 @@ def _get_virtual_screen_bounds() -> tuple[int, int, int, int]:
     return left, top, left + max(width, 1), top + max(height, 1)
 
 
+def _clamp_bounds_to_virtual_screen(
+    bounds: tuple[int, int, int, int],
+) -> tuple[int, int, int, int]:
+    """Return left, top, width, height inside the current virtual screen."""
+    left, top, right, bottom = bounds
+    screen_left, screen_top, screen_right, screen_bottom = _get_virtual_screen_bounds()
+    width = max(right - left, 1)
+    height = max(bottom - top, 1)
+    clamped_left = min(max(left, screen_left), max(screen_right - width, screen_left))
+    clamped_top = min(max(top, screen_top), max(screen_bottom - height, screen_top))
+    return int(clamped_left), int(clamped_top), width, height
+
+
 def _capture_with_print_window(hwnd: int) -> Image.Image | None:
     left, top, right, bottom = get_window_rect(hwnd)
     width = max(right - left, 1)
@@ -1859,17 +1903,40 @@ def _calculate_phone_fit_rect(hwnd: int, viewport_width: int, viewport_height: i
     return left, top, target_width, target_height
 
 
+def _cursor_overlay_origin(
+    image_size: tuple[int, int],
+    window_bounds: tuple[int, int, int, int],
+    cursor_pos: tuple[int, int],
+) -> tuple[int, int] | None:
+    """Map a desktop cursor position onto captured pixels, even when they differ in size."""
+    image_width, image_height = image_size
+    if image_width <= 0 or image_height <= 0:
+        return None
+
+    cursor_x, cursor_y = cursor_pos
+    left, top, right, bottom = window_bounds
+    if not (left <= cursor_x < right and top <= cursor_y < bottom):
+        return None
+
+    width = max(right - left, 1)
+    height = max(bottom - top, 1)
+    origin_x = int(round(((cursor_x - left) / width) * image_width))
+    origin_y = int(round(((cursor_y - top) / height) * image_height))
+    return (
+        min(max(origin_x, 0), image_width - 1),
+        min(max(origin_y, 0), image_height - 1),
+    )
+
+
 def _draw_cursor_overlay(
     image: Image.Image,
     window_bounds: tuple[int, int, int, int],
 ) -> Image.Image:
-    cursor_x, cursor_y = win32api.GetCursorPos()
-    left, top, right, bottom = window_bounds
-    if not (left <= cursor_x < right and top <= cursor_y < bottom):
+    origin = _cursor_overlay_origin(image.size, window_bounds, win32api.GetCursorPos())
+    if origin is None:
         return image
 
-    relative_x = cursor_x - left
-    relative_y = cursor_y - top
+    relative_x, relative_y = origin
     scale = max(min(image.width, image.height) / 900.0, 1.0)
     pointer_shape = [
         (0, 0),

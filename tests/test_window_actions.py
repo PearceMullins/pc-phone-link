@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 import win32con
+from PIL import Image
 from fastapi.testclient import TestClient
 
 from phone_link import windows_host
@@ -60,6 +61,111 @@ def test_clamp_bounds_to_virtual_screen_pulls_old_resolution_bounds_back_in(
     assert windows_host._clamp_bounds_to_virtual_screen((1200, 900, 2400, 1500)) == (720, 480, 1200, 600)
     assert windows_host._clamp_bounds_to_virtual_screen((-200, -150, 800, 450)) == (0, 0, 1000, 600)
     assert windows_host._clamp_bounds_to_virtual_screen((100, 100, 500, 400)) == (100, 100, 400, 300)
+
+
+def test_overlapping_popup_windows_detects_owned_menus(monkeypatch: pytest.MonkeyPatch) -> None:
+    target_hwnd = 100
+    candidates = [200, 210, 300, 400, 600, 700, 800, 900]
+    owners = {200: target_hwnd, 210: 105, 300: 500, 900: target_hwnd}
+    roots = {105: target_hwnd}
+    process_ids = {100: 11, 200: 11, 210: 11, 300: 11, 400: 11, 600: 11, 700: 22, 800: 11, 900: 11}
+    titles = {600: "Chrome Legacy Window"}
+    rects = {
+        200: (10, 10, 200, 200),
+        210: (10, 10, 200, 200),
+        300: (10, 10, 200, 200),
+        400: (10, 10, 200, 200),
+        600: (10, 10, 200, 200),
+        700: (10, 10, 200, 200),
+        800: (10, 10, 200, 200),
+        900: (5000, 5000, 5100, 5100),
+    }
+    monkeypatch.setattr(
+        windows_host.win32gui,
+        "EnumWindows",
+        lambda callback, extra: [callback(candidate, extra) for candidate in candidates],
+    )
+    monkeypatch.setattr(windows_host.win32gui, "IsWindowVisible", lambda hwnd: hwnd != 800)
+    monkeypatch.setattr(windows_host.win32gui, "IsIconic", lambda hwnd: 0)
+    monkeypatch.setattr(windows_host, "_is_window_cloaked", lambda hwnd: False)
+    monkeypatch.setattr(windows_host, "get_window_rect", lambda hwnd: rects[hwnd])
+    monkeypatch.setattr(
+        windows_host.win32gui,
+        "GetWindow",
+        lambda hwnd, _flag: owners.get(hwnd, 0),
+    )
+    monkeypatch.setattr(
+        windows_host.win32gui,
+        "GetAncestor",
+        lambda hwnd, _flag: roots.get(hwnd, 0),
+    )
+    monkeypatch.setattr(
+        windows_host.win32process,
+        "GetWindowThreadProcessId",
+        lambda hwnd: (1, process_ids.get(hwnd, 99)),
+    )
+    monkeypatch.setattr(windows_host.win32gui, "GetWindowText", lambda hwnd: titles.get(hwnd, ""))
+
+    popups = windows_host._overlapping_popup_windows(target_hwnd, (0, 0, 400, 400))
+
+    assert popups == [200, 210, 400]
+
+
+def test_capture_window_uses_screen_grab_when_popup_menu_is_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    screen_frame = Image.new("RGB", (400, 300), "#123456")
+    monkeypatch.setattr(windows_host, "_ensure_window", lambda hwnd: hwnd)
+    monkeypatch.setattr(windows_host, "get_window_rect", lambda hwnd: (0, 0, 400, 300))
+    monkeypatch.setattr(windows_host, "_overlapping_popup_windows", lambda hwnd, bounds: [999])
+    monkeypatch.setattr(windows_host, "_capture_window_from_screen", lambda hwnd, bounds: screen_frame)
+    monkeypatch.setattr(windows_host, "_draw_cursor_overlay", lambda image, bounds: image)
+
+    with mock.patch.object(windows_host, "_capture_with_print_window") as print_window:
+        captured = windows_host.capture_window(55)
+
+    assert captured.size == (400, 300)
+    print_window.assert_not_called()
+
+
+def test_capture_window_keeps_print_window_when_no_popup_is_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    print_frame = Image.new("RGB", (400, 300), "#abcdef")
+    monkeypatch.setattr(windows_host, "_ensure_window", lambda hwnd: hwnd)
+    monkeypatch.setattr(windows_host, "get_window_rect", lambda hwnd: (0, 0, 400, 300))
+    monkeypatch.setattr(windows_host, "_overlapping_popup_windows", lambda hwnd, bounds: [])
+    monkeypatch.setattr(windows_host, "_capture_with_print_window", lambda hwnd: print_frame)
+    monkeypatch.setattr(windows_host, "_draw_cursor_overlay", lambda image, bounds: image)
+
+    with mock.patch.object(windows_host, "_capture_window_from_screen") as screen_grab:
+        captured = windows_host.capture_window(55)
+
+    assert captured.size == (400, 300)
+    screen_grab.assert_not_called()
+
+
+def test_capture_window_from_screen_skips_when_another_app_is_foreground(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(windows_host.win32gui, "GetForegroundWindow", lambda: 777)
+    monkeypatch.setattr(windows_host, "_window_belongs_to", lambda hwnd, ancestor: False)
+
+    with mock.patch.object(windows_host.ImageGrab, "grab") as grab:
+        assert windows_host._capture_window_from_screen(55, (0, 0, 400, 300)) is None
+
+    grab.assert_not_called()
+
+
+def test_capture_window_from_screen_allows_own_popup_foreground(monkeypatch: pytest.MonkeyPatch) -> None:
+    screen_frame = Image.new("RGB", (400, 300), "#654321")
+    monkeypatch.setattr(windows_host.win32gui, "GetForegroundWindow", lambda: 999)
+    monkeypatch.setattr(windows_host, "_window_belongs_to", lambda hwnd, ancestor: True)
+    monkeypatch.setattr(
+        windows_host.ImageGrab,
+        "grab",
+        lambda bbox, all_screens: screen_frame,
+    )
+
+    assert windows_host._capture_window_from_screen(55, (0, 0, 400, 300)) is screen_frame
+
+
 
 
 def test_restore_window_clamps_stale_phone_fit_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:

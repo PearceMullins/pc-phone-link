@@ -584,7 +584,13 @@ def capture_window(hwnd: int, target_width: int | None = None) -> Image.Image:
 
     ensured = _ensure_window(hwnd)
     window_bounds = get_window_rect(ensured)
-    image = _capture_with_print_window(ensured)
+    image = None
+    # PrintWindow only renders the window's own surface, so popups such as
+    # context menus have to be picked up from the screen pixels instead.
+    if _overlapping_popup_windows(ensured, window_bounds):
+        image = _capture_window_from_screen(ensured, window_bounds)
+    if image is None:
+        image = _capture_with_print_window(ensured)
     if image is None:
         image = _capture_with_screen_fallback(ensured)
 
@@ -1316,6 +1322,95 @@ def _capture_with_print_window(hwnd: int) -> Image.Image | None:
         memory_dc.DeleteDC()
         source_dc.DeleteDC()
         win32gui.ReleaseDC(hwnd, window_dc)
+
+
+def _root_ancestor(hwnd: int) -> int:
+    try:
+        return int(win32gui.GetAncestor(hwnd, win32con.GA_ROOT) or 0)
+    except pywintypes.error:
+        return 0
+
+
+def _window_belongs_to(hwnd: int, ancestor: int) -> bool:
+    """True when hwnd is the ancestor itself, a child of it, or owned below it."""
+    current = int(hwnd)
+    ancestor = int(ancestor)
+    seen: set[int] = set()
+    while current and current not in seen:
+        if current == ancestor:
+            return True
+        if _root_ancestor(current) == ancestor:
+            return True
+        seen.add(current)
+        current = int(win32gui.GetWindow(current, win32con.GW_OWNER) or 0)
+    return False
+
+
+def _bounds_overlap(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> bool:
+    first_left, first_top, first_right, first_bottom = first
+    second_left, second_top, second_right, second_bottom = second
+    return (
+        first_left < second_right
+        and second_left < first_right
+        and first_top < second_bottom
+        and second_top < first_bottom
+    )
+
+
+def _overlapping_popup_windows(
+    hwnd: int,
+    bounds: tuple[int, int, int, int],
+) -> list[int]:
+    """Visible popups (context menus, dropdowns, tooltips) drawn over hwnd."""
+    target_process_id = win32process.GetWindowThreadProcessId(hwnd)[1]
+    popups: list[int] = []
+
+    def collect(candidate: int, _: int) -> bool:
+        candidate = int(candidate)
+        if candidate == hwnd or not win32gui.IsWindowVisible(candidate):
+            return True
+        if win32gui.IsIconic(candidate) or _is_window_cloaked(candidate):
+            return True
+        if not _bounds_overlap(bounds, get_window_rect(candidate)):
+            return True
+
+        owner = int(win32gui.GetWindow(candidate, win32con.GW_OWNER) or 0)
+        if owner:
+            if not _window_belongs_to(owner, hwnd):
+                return True
+        elif (
+            win32process.GetWindowThreadProcessId(candidate)[1] != target_process_id
+            or win32gui.GetWindowText(candidate).strip()
+        ):
+            return True
+
+        popups.append(candidate)
+        return True
+
+    try:
+        win32gui.EnumWindows(collect, 0)
+    except pywintypes.error:
+        return []
+    return popups
+
+
+def _capture_window_from_screen(
+    hwnd: int,
+    bounds: tuple[int, int, int, int],
+) -> Image.Image | None:
+    """Screen-grab the window rect so popups open over it land in the frame."""
+    foreground = int(win32gui.GetForegroundWindow() or 0)
+    if foreground and foreground != hwnd and not _window_belongs_to(foreground, hwnd):
+        # Another app is on top: screen pixels would no longer be this window.
+        return None
+    left, top, right, bottom = bounds
+    try:
+        return ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+    except OSError:
+        return None
 
 
 def _capture_with_screen_fallback(hwnd: int) -> Image.Image:

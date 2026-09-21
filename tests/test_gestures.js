@@ -2,6 +2,8 @@ const assert = require("node:assert/strict");
 const {
   classifyHoldAndDrag,
   classifyTwoFingerGesture,
+  isDoubleTapCandidate,
+  isHoldAndTapDrag,
   isHoldAndDragScroll,
   isParallelTwoFingerDrag,
   midpoint,
@@ -107,5 +109,38 @@ assert.deepEqual(
   ),
   { active: false, mode: null, dragIndex: -1, anchorIndex: -1 },
 );
+assert.equal(
+  isDoubleTapCandidate(
+    { completedAt: 1000, clientPoint: { x: 100, y: 100 } },
+    1200,
+    { x: 110, y: 100 },
+    { delayMs: 320, distancePx: 28 },
+  ),
+  true,
+);
+assert.equal(
+  isDoubleTapCandidate(
+    { completedAt: 1000, clientPoint: { x: 100, y: 100 } },
+    1400,
+    { x: 110, y: 100 },
+    { delayMs: 320, distancePx: 28 },
+  ),
+  false,
+);
+assert.equal(
+  isDoubleTapCandidate(
+    { completedAt: 1000, clientPoint: { x: 100, y: 100 } },
+    1200,
+    { x: 200, y: 100 },
+    { delayMs: 320, distancePx: 28 },
+  ),
+  false,
+);
+assert.equal(isDoubleTapCandidate(null, 1200, { x: 100, y: 100 }), false);
+assert.equal(isHoldAndTapDrag({ elapsedMs: 120, tapperMovement: 3, holderMovement: 4 }), true);
+assert.equal(isHoldAndTapDrag({ elapsedMs: 400, tapperMovement: 3, holderMovement: 4 }), false);
+assert.equal(isHoldAndTapDrag({ elapsedMs: 120, tapperMovement: 40, holderMovement: 4 }), false);
+assert.equal(isHoldAndTapDrag({ elapsedMs: 120, tapperMovement: 3, holderMovement: 40 }), false);
+assert.equal(isHoldAndTapDrag({ elapsedMs: 120, tapperMovement: 12, holderMovement: 12 }), true);
 
 console.log("gesture helpers: ok");

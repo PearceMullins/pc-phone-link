@@ -75,6 +75,20 @@
     };
   }
 
+  function isDoubleTapCandidate(pending, now, point, { delayMs = 320, distancePx = 28 } = {}) {
+    if (!pending || !point) return false;
+    const elapsed = now - pending.completedAt;
+    return elapsed >= 0 && elapsed <= delayMs && distance(pending.clientPoint, point) <= distancePx;
+  }
+
+  // One finger held still while the other lifts quickly: press and hold to drag.
+  function isHoldAndTapDrag({ elapsedMs, tapperMovement, holderMovement, maxDelayMs = 260, slop = 12 }) {
+    return elapsedMs >= 0
+      && elapsedMs <= maxDelayMs
+      && tapperMovement <= slop
+      && holderMovement <= slop;
+  }
+
   return {
     distance,
     midpoint,
@@ -83,5 +97,7 @@
     isParallelTwoFingerDrag,
     isHoldAndDragScroll,
     classifyHoldAndDrag,
+    isDoubleTapCandidate,
+    isHoldAndTapDrag,
   };
 }));

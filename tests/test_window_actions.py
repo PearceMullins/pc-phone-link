@@ -223,6 +223,45 @@ def test_enable_dpi_awareness_falls_back_when_modern_api_is_unavailable(
     fake_user32.SetProcessDPIAware.assert_called_once()
 
 
+def test_pointer_down_and_up_current_hold_left_button_at_cursor() -> None:
+    with (
+        mock.patch.object(windows_host, "_is_fullscreen_target", return_value=False),
+        mock.patch.object(windows_host, "_ensure_window", return_value=55),
+        mock.patch.object(windows_host, "focus_window") as focus,
+        mock.patch.object(windows_host, "_mouse_down") as mouse_down,
+        mock.patch.object(windows_host, "_mouse_up") as mouse_up,
+        mock.patch.object(windows_host, "_mouse_click") as mouse_click,
+        mock.patch.object(windows_host, "_move_cursor_to_window_point") as move_cursor,
+        mock.patch.object(windows_host, "log_gesture"),
+    ):
+        windows_host.handle_pointer(55, "down_current", 0.5, 0.5)
+        windows_host.handle_pointer(55, "up_current", 0.5, 0.5)
+
+    focus.assert_called_once_with(55)
+    mouse_down.assert_called_once_with("left")
+    mouse_up.assert_called_once_with("left")
+    mouse_click.assert_not_called()
+    move_cursor.assert_not_called()
+
+
+def test_fullscreen_pointer_down_and_up_current_hold_left_button_at_cursor() -> None:
+    with (
+        mock.patch.object(windows_host, "_get_virtual_screen_bounds", return_value=(0, 0, 1920, 1080)),
+        mock.patch.object(windows_host, "_mouse_down") as mouse_down,
+        mock.patch.object(windows_host, "_mouse_up") as mouse_up,
+        mock.patch.object(windows_host, "_mouse_click") as mouse_click,
+        mock.patch.object(windows_host, "_move_cursor_to_bounds_point") as move_cursor,
+        mock.patch.object(windows_host, "log_gesture"),
+    ):
+        windows_host.handle_pointer(windows_host.FULLSCREEN_TARGET_HWND, "down_current", 0.5, 0.5)
+        windows_host.handle_pointer(windows_host.FULLSCREEN_TARGET_HWND, "up_current", 0.5, 0.5)
+
+    mouse_down.assert_called_once_with("left")
+    mouse_up.assert_called_once_with("left")
+    mouse_click.assert_not_called()
+    move_cursor.assert_not_called()
+
+
 def test_authenticated_file_and_window_action_routes() -> None:
     application = app_module.create_app(connect_code="1234")
     application.state.paired_browsers = [{"token": "test-token"}]

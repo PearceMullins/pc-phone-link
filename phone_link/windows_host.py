@@ -732,6 +732,13 @@ def _handle_pointer_impl(
         focus_window(ensured)
         _mouse_click("left")
         return
+    if action == "down_current":
+        focus_window(ensured)
+        _mouse_down("left")
+        return
+    if action == "up_current":
+        _mouse_up("left")
+        return
     if action == "double_current":
         focus_window(ensured)
         _mouse_click("left")
@@ -812,6 +819,12 @@ def _handle_fullscreen_pointer(
         return
     if action == "click_current":
         _mouse_click("left")
+        return
+    if action == "down_current":
+        _mouse_down("left")
+        return
+    if action == "up_current":
+        _mouse_up("left")
         return
     if action == "double_current":
         _mouse_click("left")

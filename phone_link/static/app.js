@@ -716,7 +716,7 @@ function syncControlMode() {
     if (state.controlMode === "touch") {
       elements.controlModeHelp.textContent = "Tap to click, double-tap to right-click, quick two-finger tap to double-click, one finger to pan viewer, hold two fingers until Scroll ready then drag the first finger to left-click drag or the second to scroll, and pinch to zoom. Shortcuts stay active until changed.";
     } else if (state.controlMode === "trackpad") {
-      elements.controlModeHelp.textContent = "Drag to move PC mouse, tap to click, and use Shortcuts for persistent scrolling, right-click, and other pointer modes.";
+      elements.controlModeHelp.textContent = "Drag to move PC mouse, tap to click, double-tap for right-click, and hold one finger while tapping with another to grab and drag (move the held finger, then lift to drop). Shortcuts stay active until changed.";
     } else {
       elements.controlModeHelp.textContent = "Hold the bottom movement control to send W, A, S, and D. Multiple directions work together. Viewer pointer gestures pause while Game is active.";
     }
@@ -3970,7 +3970,7 @@ function dispatchPendingSingleTap(pending, reason) {
   if (state.pendingTap !== pending) return;
   window.clearTimeout(pending.timer);
   state.pendingTap = null;
-  if (state.controlMode !== "touch" || state.selectedWindow?.hwnd !== pending.windowHwnd) {
+  if (pending.controlMode !== state.controlMode || state.selectedWindow?.hwnd !== pending.windowHwnd) {
     logGestureDiagnostic("gesture-state", {
       gesture: "double-tap",
       state: "canceled",
@@ -3978,33 +3978,47 @@ function dispatchPendingSingleTap(pending, reason) {
     });
     return;
   }
-  sendPointer("touch_tap", { ...pending.sourcePoint, gestureId: pending.gestureId });
+  sendPointer(pending.singleAction, { ...pending.sourcePoint, gestureId: pending.gestureId });
   logGestureDiagnostic("gesture-classified", {
     gesture: "single-tap",
     state: "active",
     reason,
   });
-  showGestureStatus("Tap");
+  showGestureStatus(pending.singleLabel);
 }
 
-function queueAppTouchTap(sourcePoint, clientPoint) {
+function queuePendingTap({
+  sourcePoint,
+  clientPoint,
+  controlMode,
+  singleAction,
+  doubleAction,
+  singleLabel,
+  doubleLabel,
+}) {
   const now = Date.now();
   const pending = state.pendingTap;
   if (pending) {
     const elapsed = now - pending.completedAt;
     const distance = getPointerDistance(pending.clientPoint, clientPoint);
-    if (elapsed <= DOUBLE_TAP_DELAY_MS && distance <= DOUBLE_TAP_DISTANCE_PX
-      && pending.windowHwnd === state.selectedWindow?.hwnd) {
+    if (
+      window.PCPhoneLinkGestures.isDoubleTapCandidate(pending, now, clientPoint, {
+        delayMs: DOUBLE_TAP_DELAY_MS,
+        distancePx: DOUBLE_TAP_DISTANCE_PX,
+      })
+      && pending.windowHwnd === state.selectedWindow?.hwnd
+      && pending.controlMode === controlMode
+    ) {
       window.clearTimeout(pending.timer);
       state.pendingTap = null;
-      sendPointer("touch_hold", sourcePoint);
+      sendPointer(doubleAction, { ...sourcePoint, gestureId: pending.gestureId });
       logGestureDiagnostic("gesture-classified", {
         gesture: "double-tap-right-click",
         state: "active",
         delta: distance,
       }, { immediate: true });
       haptic([18, 35, 18]);
-      showGestureStatus("Right-click");
+      showGestureStatus(doubleLabel);
       return;
     }
     dispatchPendingSingleTap(pending, elapsed > DOUBLE_TAP_DELAY_MS ? "late-second-tap" : "distant-second-tap");
@@ -4016,11 +4030,38 @@ function queueAppTouchTap(sourcePoint, clientPoint) {
     completedAt: now,
     gestureId: state.currentGestureId,
     windowHwnd: state.selectedWindow?.hwnd,
+    controlMode,
+    singleAction,
+    singleLabel,
     timer: null,
   };
   next.timer = window.setTimeout(() => dispatchPendingSingleTap(next, "double-tap-timeout"), DOUBLE_TAP_DELAY_MS);
   state.pendingTap = next;
   logGestureDiagnostic("gesture-state", { gesture: "double-tap", state: "candidate" });
+}
+
+function queueAppTouchTap(sourcePoint, clientPoint) {
+  queuePendingTap({
+    sourcePoint,
+    clientPoint,
+    controlMode: "touch",
+    singleAction: "touch_tap",
+    doubleAction: "touch_hold",
+    singleLabel: "Tap",
+    doubleLabel: "Right-click",
+  });
+}
+
+function queueTrackpadTap(sourcePoint, clientPoint) {
+  queuePendingTap({
+    sourcePoint: sourcePoint || { ...state.cursorPosition },
+    clientPoint,
+    controlMode: "trackpad",
+    singleAction: "click_current",
+    doubleAction: "right_click_current",
+    singleLabel: "Click",
+    doubleLabel: "Right-click",
+  });
 }
 
 function clearTwoFingerHoldTimer(gesture = state.twoFingerGesture) {
@@ -4066,6 +4107,9 @@ function finishTwoFingerGesture({ canceled = false, recognizeTap = false } = {})
   if (gesture?.mode === "drag" && gesture.lastSourcePoint) {
     sendPointer("up", gesture.lastSourcePoint);
   }
+  if (gesture?.mode === "hold-drag") {
+    sendPointer("up_current");
+  }
   if (gesture && recognizeTap && !canceled && state.controlMode === "touch"
     && gesture.tapEligible && !gesture.mode && !gesture.scrollArmed
     && Date.now() - gesture.startedAt <= TWO_FINGER_TAP_MAX_MS
@@ -4102,6 +4146,38 @@ function finishTwoFingerGesture({ canceled = false, recognizeTap = false } = {})
   if (gesture) gesture.pointerIds.forEach((pointerId) => state.activePointers.delete(pointerId));
   state.twoFingerGesture = null;
   resetPrimaryPointerState();
+}
+
+function tryStartTrackpadHoldDrag(gesture, event) {
+  if (state.controlMode !== "trackpad") return false;
+  if (gesture.mode || gesture.scrollArmed || !gesture.tapEligible) return false;
+  const remainingId = gesture.pointerIds.find(
+    (pointerId) => pointerId !== event.pointerId && state.activePointers.has(pointerId),
+  );
+  if (remainingId === undefined) return false;
+  const releasedIndex = gesture.pointerIds.indexOf(event.pointerId);
+  const tapperMovement = releasedIndex === 0 ? gesture.maxMovementA : gesture.maxMovementB;
+  const holderMovement = releasedIndex === 0 ? gesture.maxMovementB : gesture.maxMovementA;
+  const eligible = window.PCPhoneLinkGestures.isHoldAndTapDrag({
+    elapsedMs: Date.now() - gesture.startedAt,
+    tapperMovement,
+    holderMovement,
+    maxDelayMs: TWO_FINGER_TAP_MAX_MS,
+    slop: TWO_FINGER_TAP_SLOP,
+  });
+  if (!eligible) return false;
+
+  gesture.mode = "hold-drag";
+  gesture.dragPointerId = remainingId;
+  gesture.lastDragPoint = { ...state.activePointers.get(remainingId) };
+  sendPointer("down_current");
+  haptic([14, 26, 14]);
+  showGestureStatus("Drag");
+  logGestureDiagnostic("gesture-classified", {
+    gesture: "hold-tap-drag",
+    state: "active",
+  }, { immediate: true });
+  return true;
 }
 
 function resetPrimaryPointerState() {
@@ -4438,6 +4514,24 @@ function handlePointerMove(event) {
     const second = state.activePointers.get(gesture.pointerIds[1]);
     if (first) gesture.maxMovementA = Math.max(gesture.maxMovementA, getPointerDistance(gesture.startA, first));
     if (second) gesture.maxMovementB = Math.max(gesture.maxMovementB, getPointerDistance(gesture.startB, second));
+
+    if (gesture.mode === "hold-drag") {
+      const dragPoint = state.activePointers.get(gesture.dragPointerId);
+      if (!dragPoint) return;
+      event.preventDefault();
+      const previous = gesture.lastDragPoint || dragPoint;
+      const deltaX = dragPoint.x - previous.x;
+      const deltaY = dragPoint.y - previous.y;
+      gesture.lastDragPoint = { ...dragPoint };
+      if (Math.abs(deltaX) >= 0.5 || Math.abs(deltaY) >= 0.5) {
+        sendPointer("move_relative", {
+          deltaX: deltaX * state.mouseSpeed * TRACKPAD_BASE_SPEED,
+          deltaY: deltaY * state.mouseSpeed * TRACKPAD_BASE_SPEED,
+        });
+      }
+      return;
+    }
+
     if (!first || !second) return;
     event.preventDefault();
     cancelPendingTap("two-finger-gesture");
@@ -4639,6 +4733,7 @@ function handlePointerUp(event) {
     clearTwoFingerHoldTimer(gesture);
     gesture.holdEligible = false;
     gesture.releasedPointerIds.add(event.pointerId);
+    if (tryStartTrackpadHoldDrag(gesture, event)) return;
     if (gesture.releasedPointerIds.size === gesture.pointerIds.length) {
       finishTwoFingerGesture({ recognizeTap: true });
     }
@@ -4696,14 +4791,18 @@ function handlePointerUp(event) {
   }
 
   if (!didDrag) {
-    const action = state.gestureArm === "double"
-      ? "double_current"
-      : state.gestureArm === "right"
-        ? "right_click_current"
-        : "click_current";
-    sendPointer(action);
-    if (arms.isTapArm(state.gestureArm) && state.gestureArm !== "left") {
-      showGestureStatus(arms.ARM_LABELS[state.gestureArm]);
+    if (state.controlMode === "trackpad" && state.gestureArm === arms.GESTURE_ARMS.GESTURES) {
+      queueTrackpadTap(state.lastSourcePoint || state.startSourcePoint, { x: event.clientX, y: event.clientY });
+    } else {
+      const action = state.gestureArm === "double"
+        ? "double_current"
+        : state.gestureArm === "right"
+          ? "right_click_current"
+          : "click_current";
+      sendPointer(action);
+      if (arms.isTapArm(state.gestureArm) && state.gestureArm !== "left") {
+        showGestureStatus(arms.ARM_LABELS[state.gestureArm]);
+      }
     }
   } else if (armedDragArm || state.gestureArm === arms.GESTURE_ARMS.PAN) {
     if (state.gestureArm === arms.GESTURE_ARMS.DRAG) {

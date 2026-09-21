@@ -42,13 +42,32 @@ def test_app_shell_declares_pwa_and_all_destinations() -> None:
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     script = (STATIC / "app.js").read_text(encoding="utf-8")
     assert 'rel="manifest"' in html
-    for destination in ("controls", "settings"):
+    for destination in ("apps", "files", "controls", "settings"):
         assert f'data-destination="{destination}"' in html
     assert 'id="mobileNav"' in html
     assert 'id="bottomNavEditor"' in html
-    for shortcut in ("desktop", "windows", "keyboard", "controls", "settings"):
+    assert 'data-pointer-shortcut="gestures"' in html
+    for shortcut in ("desktop", "windows", "apps", "files", "keyboard", "shortcuts", "controls", "settings"):
         assert f'{shortcut}:' in script
     for element_id in (
+        "appsPanel",
+        "appList",
+        "appSearchForm",
+        "appSearchInput",
+        "closeApps",
+        "quickActions",
+        "pinnedSection",
+        "pinnedItems",
+        "refreshApps",
+        "pinCurrentFolder",
+        "filesPanel",
+        "fileList",
+        "filePathInput",
+        "closeFiles",
+        "closeWindow",
+        "shortcutsPanel",
+        "shortcutMenu",
+        "activeShortcut",
         "gameControls",
         "gameInputStyle",
         "gameUiSize",
@@ -64,6 +83,13 @@ def test_app_shell_declares_pwa_and_all_destinations() -> None:
         "gamePad",
     ):
         assert f'id="{element_id}"' in html
+    assert '"/api/files/reveal"' in script
+    assert '"/api/files/open"' in script
+    assert "`/api/apps" in script
+    assert '"/api/launch"' in script
+    assert '"/api/pins"' in script
+    assert '"/api/quick-actions"' in script
+    assert '/close`' in script
     assert '<option value="game">Game</option>' in html
     assert '/game-key`' in script
     assert 'data-game-mouse-button="middle"' in html

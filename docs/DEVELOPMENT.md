@@ -80,6 +80,9 @@ Output: `dist/PCPhoneLink/` with launcher and host executables.
 | `phone_link/app.py` | Main FastAPI host |
 | `phone_link/connect.py` | Connect code and simplified pairing |
 | `phone_link/windows_host.py` | Win32 capture and input |
+| `phone_link/file_browser.py` | PC file browsing and shell open/reveal |
+| `phone_link/app_launcher.py` | Start Menu and desktop app list, icons, launch, quick actions |
+| `phone_link/pins_store.py` | Per-phone pinned apps and folders |
 | `phone_link/streaming.py` | WebSocket and MJPEG streaming |
 | `phone_link/static/` | Phone control UI |
 | `phone_link/runtime_paths.py` | Dev vs frozen executable paths |

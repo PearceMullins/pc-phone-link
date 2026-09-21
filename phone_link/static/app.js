@@ -11,6 +11,21 @@ const state = {
   previousNonDesktopWindow: null,
   defaultDesktopHandled: false,
   windows: [],
+  apps: [],
+  quickActions: [],
+  appsLoaded: false,
+  appsLoading: false,
+  appsMessage: null,
+  appSearch: "",
+  pins: [],
+  pinsLoaded: false,
+  filesPath: null,
+  filesParent: null,
+  filesEntries: [],
+  filesBreadcrumbs: [],
+  filesLoaded: false,
+  filesLoading: false,
+  filesMessage: null,
   mouseSpeed: 2.5,
   gestureArm: "gestures",
   controlMode: "touch",
@@ -189,6 +204,8 @@ const MAX_OPTIONAL_BOTTOM_NAV = 3;
 const BOTTOM_NAV_CATALOG = Object.freeze({
   desktop: { label: "Full screen", icon: "▣" },
   windows: { label: "Windows", icon: "▤" },
+  apps: { label: "Apps", icon: "▦" },
+  files: { label: "Files", icon: "F" },
   keyboard: { label: "Keyboard", icon: "⌨" },
   gestureHelp: { label: "Gestures", icon: "?" },
   rightClick: { label: "Right click", icon: "R" },
@@ -239,10 +256,23 @@ const elements = {
   app: document.getElementById("app"),
   applyTextScale: document.getElementById("applyTextScale"),
   authPanel: document.getElementById("authPanel"),
+  appList: document.getElementById("appList"),
+  appSearchForm: document.getElementById("appSearchForm"),
+  appSearchInput: document.getElementById("appSearchInput"),
+  appsPanel: document.getElementById("appsPanel"),
+  appsStatus: document.getElementById("appsStatus"),
+  closeApps: document.getElementById("closeApps"),
+  pinCurrentFolder: document.getElementById("pinCurrentFolder"),
+  pinnedItems: document.getElementById("pinnedItems"),
+  pinnedSection: document.getElementById("pinnedSection"),
+  quickActions: document.getElementById("quickActions"),
+  refreshApps: document.getElementById("refreshApps"),
   connectButton: document.getElementById("connectButton"),
   connectCodeDisplay: document.getElementById("connectCodeDisplay"),
   connectStatus: document.getElementById("connectStatus"),
   connectionStatus: document.getElementById("connectionStatus"),
+  closeFiles: document.getElementById("closeFiles"),
+  closeWindow: document.getElementById("closeWindow"),
   controlsPanel: document.getElementById("controlsPanel"),
   controlMode: document.getElementById("controlMode"),
   controlModeHelp: document.getElementById("controlModeHelp"),
@@ -275,6 +305,14 @@ const elements = {
   fitToggle: document.getElementById("fitToggle"),
   fitShape: document.getElementById("fitShape"),
   fitShapeValue: document.getElementById("fitShapeValue"),
+  fileBreadcrumbs: document.getElementById("fileBreadcrumbs"),
+  fileBrowserStatus: document.getElementById("fileBrowserStatus"),
+  fileHome: document.getElementById("fileHome"),
+  fileList: document.getElementById("fileList"),
+  filePathForm: document.getElementById("filePathForm"),
+  filePathInput: document.getElementById("filePathInput"),
+  filesPanel: document.getElementById("filesPanel"),
+  fileUp: document.getElementById("fileUp"),
   focusWindow: document.getElementById("focusWindow"),
   followMouse: document.getElementById("followMouse"),
   keyboardPanel: document.getElementById("keyboardPanel"),
@@ -290,9 +328,11 @@ const elements = {
   settingsPowerMenu: document.getElementById("settingsPowerMenu"),
   settingsPowerToggle: document.getElementById("settingsPowerToggle"),
   refreshWindows: document.getElementById("refreshWindows"),
+  refreshFiles: document.getElementById("refreshFiles"),
   refreshTrustedDevices: document.getElementById("refreshTrustedDevices"),
   remoteView: document.getElementById("remoteView"),
   restoreWindow: document.getElementById("restoreWindow"),
+  revealCurrentFolder: document.getElementById("revealCurrentFolder"),
   rightClickMode: document.getElementById("rightClickMode"),
   scrollMode: document.getElementById("scrollMode"),
   scrollDown: document.getElementById("scrollDown"),
@@ -394,7 +434,7 @@ function saveBottomNavConfig(optionalItems) {
 
 function bottomNavItemState(id) {
   if (id === "desktop") return state.currentDestination === "viewer" && Boolean(state.selectedWindow?.is_desktop_capture);
-  if (["windows", "keyboard", "shortcuts", "controls", "settings"].includes(id)) return state.currentDestination === id;
+  if (["windows", "apps", "files", "keyboard", "shortcuts", "controls", "settings"].includes(id)) return state.currentDestination === id;
   if (id === "rightClick") return state.gestureArm === "right";
   if (id === "doubleClick") return state.gestureArm === "double";
   if (id === "fit") return state.phoneFitEnabled;
@@ -558,7 +598,7 @@ async function maybeSelectDefaultDesktopCapture() {
 async function executeBottomNavAction(id) {
   logGestureDiagnostic("bottom-nav-action", { action: id, state: "invoked" });
   if (id === "desktop") return selectDesktopCapture();
-  if (["windows", "keyboard", "shortcuts", "controls", "settings"].includes(id)) {
+  if (["windows", "apps", "files", "keyboard", "shortcuts", "controls", "settings"].includes(id)) {
     openDestination(id, { toggle: true });
     return;
   }
@@ -674,7 +714,7 @@ function syncControlMode() {
   }
   if (elements.controlModeHelp) {
     if (state.controlMode === "touch") {
-      elements.controlModeHelp.textContent = "Tap to click, double-tap to right-click, quick two-finger tap to double-click, one finger to pan viewer, hold two fingers until Scroll ready then hold one finger and drag the other to scroll, and pinch to zoom.";
+      elements.controlModeHelp.textContent = "Tap to click, double-tap to right-click, quick two-finger tap to double-click, one finger to pan viewer, hold two fingers until Scroll ready then drag the first finger to left-click drag or the second to scroll, and pinch to zoom. Shortcuts stay active until changed.";
     } else if (state.controlMode === "trackpad") {
       elements.controlModeHelp.textContent = "Drag to move PC mouse, tap to click, and use Shortcuts for persistent scrolling, right-click, and other pointer modes.";
     } else {
@@ -2431,6 +2471,9 @@ function syncTargetActionButtons() {
   if (elements.toggleKeyboard) {
     elements.toggleKeyboard.disabled = !hasTarget;
   }
+  if (elements.closeWindow) {
+    elements.closeWindow.disabled = windowOnlyDisabled;
+  }
   syncFitShapeControls();
 }
 
@@ -2438,6 +2481,7 @@ async function refreshWindows() {
   const data = await apiFetch("/api/windows");
   state.windows = data.windows || [];
   renderWindowList();
+  if (state.currentDestination === "apps") renderApps();
 
   if (!state.selectedWindow) {
     return;
@@ -2477,12 +2521,15 @@ function renderWindowList() {
   });
 
   for (const windowInfo of orderedWindows) {
+    const card = document.createElement("article");
+    card.className = "window-card";
+    if (state.selectedWindow && state.selectedWindow.hwnd === windowInfo.hwnd) {
+      card.classList.add("active");
+    }
+
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "window-card";
-    if (state.selectedWindow && state.selectedWindow.hwnd === windowInfo.hwnd) {
-      button.classList.add("active");
-    }
+    button.className = "window-card-select";
 
     const title = document.createElement("strong");
     title.textContent = windowInfo.title;
@@ -2507,7 +2554,20 @@ function renderWindowList() {
       selectWindow(windowInfo).catch((error) => showToast(error.message));
     });
 
-    elements.windowList.append(button);
+    card.append(button);
+    if (!windowInfo.is_desktop_capture) {
+      const closeButton = document.createElement("button");
+      closeButton.type = "button";
+      closeButton.className = "danger-button window-close-button";
+      closeButton.textContent = "Close";
+      closeButton.setAttribute("aria-label", `Close ${windowInfo.title || "window"}`);
+      closeButton.addEventListener("click", () => {
+        requestCloseWindow(windowInfo).catch((error) => showToast(error.message));
+      });
+      card.append(closeButton);
+    }
+
+    elements.windowList.append(card);
   }
 }
 
@@ -2536,6 +2596,481 @@ async function selectWindow(windowInfo) {
   refreshStream();
   openDestination("viewer");
   closeDrawerOnSmallScreens();
+}
+
+async function requestCloseWindow(windowInfo) {
+  if (!windowInfo || windowInfo.is_desktop_capture) {
+    showToast("Choose an app window to close.");
+    return false;
+  }
+  const title = windowInfo.title || "this window";
+  if (!window.confirm(`Close ${title}? Unsaved work may cause the app to ask for confirmation on the PC.`)) {
+    return false;
+  }
+  await apiFetch(`/api/windows/${windowInfo.hwnd}/close`, { method: "POST" });
+  showToast(`Close requested for ${title}.`);
+  window.setTimeout(() => refreshWindows().catch(() => null), 350);
+  return true;
+}
+
+async function closeSelectedWindow() {
+  if (!state.selectedWindow || state.selectedWindow.is_desktop_capture) {
+    showToast("Open Windows and choose an app window.");
+    return;
+  }
+  await requestCloseWindow(state.selectedWindow);
+}
+
+function formatFileSize(size) {
+  if (!Number.isFinite(size) || size < 0) return "File";
+  if (size < 1024) return `${size} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = size / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function formatFileModified(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], { month: "short", day: "numeric", year: "numeric" });
+}
+
+function renderFileBrowser() {
+  if (!elements.fileList) return;
+  elements.fileList.replaceChildren();
+  elements.fileBreadcrumbs?.replaceChildren();
+  if (elements.filePathInput) elements.filePathInput.value = state.filesPath || "";
+  if (elements.fileUp) elements.fileUp.disabled = !state.filesParent || state.filesLoading;
+  if (elements.revealCurrentFolder) {
+    elements.revealCurrentFolder.disabled = !state.filesPath || state.filesLoading;
+  }
+  if (elements.pinCurrentFolder) {
+    elements.pinCurrentFolder.disabled = !state.filesPath || state.filesLoading;
+  }
+  if (elements.refreshFiles) elements.refreshFiles.disabled = state.filesLoading;
+
+  if (elements.fileBreadcrumbs) {
+    const home = document.createElement("button");
+    home.type = "button";
+    home.className = "ghost-button";
+    home.textContent = "This PC";
+    home.addEventListener("click", () => loadFiles(null).catch((error) => showToast(error.message)));
+    elements.fileBreadcrumbs.append(home);
+    state.filesBreadcrumbs.forEach((crumb) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ghost-button";
+      button.textContent = crumb.name;
+      button.addEventListener("click", () => loadFiles(crumb.path).catch((error) => showToast(error.message)));
+      elements.fileBreadcrumbs.append(button);
+    });
+  }
+
+  if (elements.fileBrowserStatus) {
+    if (state.filesLoading) {
+      elements.fileBrowserStatus.textContent = "Loading files...";
+    } else if (state.filesMessage) {
+      elements.fileBrowserStatus.textContent = state.filesMessage;
+    } else {
+      elements.fileBrowserStatus.textContent = `${state.filesEntries.length} item${state.filesEntries.length === 1 ? "" : "s"}.`;
+    }
+  }
+  if (state.filesLoading) return;
+
+  if (!state.filesEntries.length) {
+    const empty = document.createElement("p");
+    empty.className = "eyebrow";
+    empty.textContent = state.filesPath ? "This folder is empty." : "No file locations were found.";
+    elements.fileList.append(empty);
+    return;
+  }
+
+  state.filesEntries.forEach((entry) => {
+    const row = document.createElement("article");
+    row.className = "file-entry";
+    const main = document.createElement("button");
+    main.type = "button";
+    main.className = "file-entry-main";
+    const icon = document.createElement("span");
+    icon.className = "file-entry-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = entry.is_directory ? "📁" : "📄";
+    const copy = document.createElement("span");
+    copy.className = "file-entry-copy";
+    const name = document.createElement("strong");
+    name.textContent = entry.name;
+    const metadata = document.createElement("span");
+    const modified = formatFileModified(entry.modified_at);
+    metadata.textContent = entry.is_directory
+      ? (entry.is_location ? "Location" : "Folder")
+      : [formatFileSize(entry.size), modified].filter(Boolean).join(" - ");
+    copy.append(name, metadata);
+    main.append(icon, copy);
+    main.setAttribute("aria-label", entry.is_directory ? `Open ${entry.name}` : `Show ${entry.name} on PC`);
+    main.addEventListener("click", () => {
+      const action = entry.is_directory ? loadFiles(entry.path) : revealFilePath(entry.path);
+      action.catch((error) => showToast(error.message));
+    });
+    row.append(main);
+
+    const reveal = document.createElement("button");
+    reveal.type = "button";
+    reveal.className = "ghost-button file-entry-reveal";
+    reveal.textContent = "On PC";
+    reveal.setAttribute("aria-label", `Show ${entry.name} in File Explorer on PC`);
+    reveal.addEventListener("click", () => revealFilePath(entry.path).catch((error) => showToast(error.message)));
+    row.append(reveal);
+
+    if (!entry.is_directory) {
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "ghost-button file-entry-reveal";
+      open.textContent = "Open";
+      open.setAttribute("aria-label", `Open ${entry.name} on PC with its default app`);
+      open.addEventListener("click", () => openFilePath(entry.path).catch((error) => showToast(error.message)));
+      row.append(open);
+    }
+
+    elements.fileList.append(row);
+  });
+}
+
+async function loadFiles(path = state.filesPath) {
+  if (state.filesLoading) return;
+  state.filesLoading = true;
+  state.filesMessage = null;
+  renderFileBrowser();
+  try {
+    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    const data = await apiFetch(`/api/files${query}`);
+    state.filesPath = data.path || null;
+    state.filesParent = data.parent || null;
+    state.filesEntries = Array.isArray(data.entries) ? data.entries : [];
+    state.filesBreadcrumbs = Array.isArray(data.breadcrumbs) ? data.breadcrumbs : [];
+    state.filesLoaded = true;
+    state.filesMessage = data.truncated
+      ? `Showing first ${state.filesEntries.length} items.`
+      : null;
+  } catch (error) {
+    state.filesMessage = error.message || "Could not open that folder.";
+    throw error;
+  } finally {
+    state.filesLoading = false;
+    renderFileBrowser();
+  }
+}
+
+async function revealFilePath(path) {
+  if (!path) return;
+  await apiFetch("/api/files/reveal", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+  showToast("Opened in File Explorer on PC.");
+  window.setTimeout(() => refreshWindows().catch(() => null), 500);
+}
+
+async function openFilePath(path) {
+  if (!path) return;
+  await apiFetch("/api/files/open", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+  showToast("Opening on PC with its default app.");
+  window.setTimeout(() => refreshWindows().catch(() => null), 900);
+}
+
+function looksLikeWindowsPath(value) {
+  return /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith("\\\\");
+}
+
+function appIconElement(app) {
+  const icon = document.createElement("span");
+  icon.className = "app-entry-icon";
+  icon.setAttribute("aria-hidden", "true");
+  const fallback = document.createElement("span");
+  fallback.className = "app-entry-icon-fallback";
+  fallback.textContent = (app.name || "?").trim().charAt(0).toUpperCase() || "?";
+  icon.append(fallback);
+  if (app.icon_url) {
+    const image = document.createElement("img");
+    image.alt = "";
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.hidden = true;
+    const separator = app.icon_url.includes("?") ? "&" : "?";
+    image.src = `${app.icon_url}${separator}token=${encodeURIComponent(state.token || "")}`;
+    image.addEventListener("load", () => {
+      image.hidden = false;
+      fallback.hidden = true;
+    });
+    image.addEventListener("error", () => image.remove());
+    icon.append(image);
+  }
+  return icon;
+}
+
+function createAppRow(app) {
+  const row = document.createElement("article");
+  row.className = "app-entry";
+  if (app.running_hwnd) row.classList.add("running");
+
+  const main = document.createElement("button");
+  main.type = "button";
+  main.className = "app-entry-main";
+  main.append(appIconElement(app));
+
+  const copy = document.createElement("span");
+  copy.className = "app-entry-copy";
+  const name = document.createElement("strong");
+  name.textContent = app.name;
+  const metadata = document.createElement("span");
+  metadata.textContent = app.running_hwnd
+    ? `Running${app.running_title ? ` - ${app.running_title}` : ""}`
+    : app.source || "App";
+  copy.append(name, metadata);
+  main.append(copy);
+  main.setAttribute("aria-label", app.running_hwnd ? `Focus ${app.name}` : `Launch ${app.name}`);
+  main.addEventListener("click", () => launchAppTarget(app.target, app.name).catch((error) => showToast(error.message)));
+  row.append(main);
+
+  const pin = document.createElement("button");
+  pin.type = "button";
+  pin.className = "ghost-button app-pin-button";
+  pin.textContent = "Pin";
+  pin.setAttribute("aria-label", `Pin ${app.name}`);
+  pin.addEventListener("click", () => {
+    pinTarget({ kind: "app", label: app.name, target: app.target }).catch((error) => showToast(error.message));
+  });
+  row.append(pin);
+  return row;
+}
+
+function createWindowResultRow(windowInfo) {
+  const row = document.createElement("article");
+  row.className = "app-entry window-result";
+  const main = document.createElement("button");
+  main.type = "button";
+  main.className = "app-entry-main";
+  const icon = document.createElement("span");
+  icon.className = "app-entry-icon app-entry-icon-fallback";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = "▢";
+  const copy = document.createElement("span");
+  copy.className = "app-entry-copy";
+  const name = document.createElement("strong");
+  name.textContent = windowInfo.title || windowInfo.process_name || "Window";
+  const metadata = document.createElement("span");
+  metadata.textContent = `Open - ${windowInfo.process_name || "App"}`;
+  copy.append(name, metadata);
+  main.append(icon, copy);
+  main.setAttribute("aria-label", `Switch to ${name.textContent}`);
+  main.addEventListener("click", () => selectWindow(windowInfo).catch((error) => showToast(error.message)));
+  row.append(main);
+  return row;
+}
+
+function createSectionHeading(text) {
+  const heading = document.createElement("p");
+  heading.className = "app-list-heading";
+  heading.textContent = text;
+  return heading;
+}
+
+function renderQuickActions() {
+  if (!elements.quickActions) return;
+  elements.quickActions.replaceChildren();
+  for (const action of state.quickActions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "quick-action";
+    button.dataset.quickAction = action.id;
+    button.setAttribute("aria-label", action.label);
+    const icon = document.createElement("span");
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = action.icon || "▶";
+    const label = document.createElement("small");
+    label.textContent = action.label;
+    button.append(icon, label);
+    elements.quickActions.append(button);
+  }
+}
+
+function renderPins() {
+  if (!elements.pinnedItems || !elements.pinnedSection) return;
+  elements.pinnedSection.hidden = !state.pins.length;
+  elements.pinnedItems.replaceChildren();
+  for (const pin of state.pins) {
+    const chip = document.createElement("span");
+    chip.className = "pinned-chip";
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "pinned-open";
+    const icon = document.createElement("span");
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = pin.kind === "folder" ? "📁" : pin.kind === "action" ? "▶" : "▦";
+    const label = document.createElement("span");
+    label.textContent = pin.label;
+    open.append(icon, label);
+    open.setAttribute("aria-label", `Open pinned ${pin.label}`);
+    open.addEventListener("click", () => activatePin(pin).catch((error) => showToast(error.message)));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "pinned-remove";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `Unpin ${pin.label}`);
+    remove.addEventListener("click", () => removePin(pin).catch((error) => showToast(error.message)));
+    chip.append(open, remove);
+    elements.pinnedItems.append(chip);
+  }
+}
+
+function renderApps() {
+  if (!elements.appList) return;
+  elements.appList.replaceChildren();
+  renderQuickActions();
+  renderPins();
+
+  const query = state.appSearch.trim().toLowerCase();
+  const matchedApps = query
+    ? state.apps.filter((app) => `${app.name || ""} ${app.target || ""} ${app.source || ""}`.toLowerCase().includes(query))
+    : state.apps;
+  const matchedWindows = query
+    ? state.windows.filter((windowInfo) => !windowInfo.is_desktop_capture
+      && `${windowInfo.title || ""} ${windowInfo.process_name || ""}`.toLowerCase().includes(query))
+    : [];
+
+  if (elements.appsStatus) {
+    if (state.appsLoading) {
+      elements.appsStatus.textContent = "Loading apps...";
+    } else if (state.appsMessage) {
+      elements.appsStatus.textContent = state.appsMessage;
+    } else if (query) {
+      const windowCount = matchedWindows.length;
+      elements.appsStatus.textContent = `${matchedApps.length} app${matchedApps.length === 1 ? "" : "s"} and ${windowCount} open window${windowCount === 1 ? "" : "s"} match.`;
+    } else {
+      elements.appsStatus.textContent = `${state.apps.length} app${state.apps.length === 1 ? "" : "s"} ready to launch.`;
+    }
+  }
+  if (state.appsLoading) return;
+
+  if (matchedWindows.length) {
+    elements.appList.append(createSectionHeading("Open windows"));
+    matchedWindows.slice(0, 20).forEach((windowInfo) => elements.appList.append(createWindowResultRow(windowInfo)));
+  }
+
+  if (!matchedApps.length && !matchedWindows.length) {
+    const empty = document.createElement("p");
+    empty.className = "eyebrow";
+    empty.textContent = query
+      ? "Nothing matched. Try part of an app or window name, or enter a full folder path and tap Search."
+      : "No launchable apps were found in the Start Menu or on the desktop.";
+    elements.appList.append(empty);
+    return;
+  }
+
+  const visibleApps = matchedApps.slice(0, 60);
+  if (visibleApps.length) {
+    elements.appList.append(createSectionHeading(query ? "Apps" : "Start menu and desktop"));
+    visibleApps.forEach((app) => elements.appList.append(createAppRow(app)));
+  }
+  if (matchedApps.length > visibleApps.length) {
+    const more = document.createElement("p");
+    more.className = "eyebrow";
+    more.textContent = `Showing first ${visibleApps.length} of ${matchedApps.length} apps. Refine your search to narrow the list.`;
+    elements.appList.append(more);
+  }
+}
+
+async function loadApps({ force = false } = {}) {
+  if (state.appsLoading) return;
+  state.appsLoading = true;
+  state.appsMessage = null;
+  renderApps();
+  try {
+    const data = await apiFetch(`/api/apps${force ? "?refresh=true" : ""}`);
+    state.apps = Array.isArray(data.apps) ? data.apps : [];
+    state.quickActions = Array.isArray(data.quick_actions) ? data.quick_actions : [];
+    state.appsLoaded = true;
+  } catch (error) {
+    state.appsMessage = error.message || "Could not list apps.";
+    throw error;
+  } finally {
+    state.appsLoading = false;
+    renderApps();
+  }
+}
+
+async function loadPins() {
+  try {
+    const data = await apiFetch("/api/pins");
+    state.pins = Array.isArray(data.pins) ? data.pins : [];
+    state.pinsLoaded = true;
+  } catch {
+    state.pins = [];
+  }
+  renderPins();
+}
+
+async function pinTarget({ kind, label, target }) {
+  if (!target) throw new Error("Choose something to pin first.");
+  const data = await apiFetch("/api/pins", {
+    method: "POST",
+    body: JSON.stringify({ kind, label, target }),
+  });
+  state.pins = Array.isArray(data.pins) ? data.pins : state.pins;
+  state.pinsLoaded = true;
+  renderPins();
+  showToast(`Pinned ${label}.`);
+}
+
+async function removePin(pin) {
+  const data = await apiFetch(`/api/pins/${encodeURIComponent(pin.id)}`, { method: "DELETE" });
+  state.pins = Array.isArray(data.pins) ? data.pins : [];
+  renderPins();
+  showToast(`Removed ${pin.label}.`);
+}
+
+async function activatePin(pin) {
+  if (pin.kind === "action") return runQuickAction(pin.target);
+  if (pin.kind === "folder") {
+    openDestination("files");
+    return loadFiles(pin.target);
+  }
+  return launchAppTarget(pin.target, pin.label);
+}
+
+async function launchAppTarget(target, label = "") {
+  const result = await apiFetch("/api/launch", {
+    method: "POST",
+    body: JSON.stringify({ target, label }),
+  });
+  const targetWindow = result?.window?.hwnd
+    ? state.windows.find((windowInfo) => windowInfo.hwnd === result.window.hwnd)
+    : null;
+  if (targetWindow) {
+    await selectWindow(targetWindow);
+    showToast(`${label || "App"} opened.`);
+    return;
+  }
+  showToast(result?.action === "focused" ? `${label || "App"} focused.` : `Opening ${label || "app"}...`);
+  window.setTimeout(() => refreshWindows().catch(() => null), 1500);
+}
+
+async function runQuickAction(actionId) {
+  await apiFetch("/api/quick-actions", {
+    method: "POST",
+    body: JSON.stringify({ action: actionId }),
+  });
+  const action = state.quickActions.find((entry) => entry.id === actionId);
+  showToast(`${action?.label || "Action"} sent.`);
+  window.setTimeout(() => refreshWindows().catch(() => null), 700);
 }
 
 function getStreamRequestWidth() {
@@ -3528,6 +4063,9 @@ function finishTwoFingerGesture({ canceled = false, recognizeTap = false } = {})
   if (gesture?.mode === "scroll" && gesture.lastSourcePoint) {
     if (state.controlMode === "touch") sendPointer(canceled ? "touch_cancel" : "touch_up", gesture.lastSourcePoint);
   }
+  if (gesture?.mode === "drag" && gesture.lastSourcePoint) {
+    sendPointer("up", gesture.lastSourcePoint);
+  }
   if (gesture && recognizeTap && !canceled && state.controlMode === "touch"
     && gesture.tapEligible && !gesture.mode && !gesture.scrollArmed
     && Date.now() - gesture.startedAt <= TWO_FINGER_TAP_MAX_MS
@@ -3906,7 +4444,7 @@ function handlePointerMove(event) {
 
     if (!gesture.mode) {
       const holdDrag = gesture.scrollArmed
-        ? window.PCPhoneLinkGestures.isHoldAndDragScroll(
+        ? window.PCPhoneLinkGestures.classifyHoldAndDrag(
           gesture.armA,
           gesture.armB,
           first,
@@ -3914,9 +4452,9 @@ function handlePointerMove(event) {
           TWO_FINGER_HOLD_SLOP,
           TWO_FINGER_SCROLL_START_THRESHOLD,
         )
-        : { active: false, dragIndex: -1 };
+        : { active: false, mode: null, dragIndex: -1 };
       if (holdDrag.active) {
-        gesture.mode = "scroll";
+        gesture.mode = holdDrag.mode;
         gesture.dragPointerId = gesture.pointerIds[holdDrag.dragIndex];
       } else {
         const pinchMode = window.PCPhoneLinkGestures.classifyTwoFingerGesture(
@@ -3956,9 +4494,23 @@ function handlePointerMove(event) {
         haptic();
         showGestureStatus("Zoom");
         setCameraFocus(gesture.startFocus.x, gesture.startFocus.y);
+      } else if (gesture.mode === "drag") {
+        showGestureStatus("Drag");
+        const startSource = viewerPointToSourceNormalized(gesture.armA.x, gesture.armA.y)
+          || viewerPointToSourceNormalized(first.x, first.y);
+        gesture.lastDragPoint = { ...first };
+        gesture.lastSourcePoint = startSource;
+        if (startSource) {
+          sendPointer("down", startSource);
+          const currentSource = viewerPointToSourceNormalized(first.x, first.y);
+          if (currentSource) {
+            gesture.lastSourcePoint = currentSource;
+            sendPointer("move", currentSource);
+          }
+        }
       } else {
         showGestureStatus("Scroll");
-        const dragPoint = state.activePointers.get(gesture.dragPointerId) || first;
+        const dragPoint = state.activePointers.get(gesture.dragPointerId) || second;
         const startSource = viewerPointToSourceNormalized(dragPoint.x, dragPoint.y);
         gesture.lastDragPoint = { ...dragPoint };
         gesture.lastSourcePoint = startSource;
@@ -3969,6 +4521,16 @@ function handlePointerMove(event) {
     if (gesture.mode === "pinch") {
       const startDistance = Math.max(getPointerDistance(gesture.startA, gesture.startB), 1);
       setCameraScale(gesture.startScale * (getPointerDistance(first, second) / startDistance));
+      return;
+    }
+
+    if (gesture.mode === "drag") {
+      const sourcePoint = viewerPointToSourceNormalized(first.x, first.y) || gesture.lastSourcePoint;
+      if (sourcePoint) {
+        gesture.lastSourcePoint = sourcePoint;
+        sendPointer("move", sourcePoint);
+      }
+      gesture.lastDragPoint = { ...first };
       return;
     }
 
@@ -5143,6 +5705,8 @@ function openDestination(destination, { toggle = false } = {}) {
   closePowerMenus();
   state.currentDestination = next;
   elements.windowDrawer.classList.remove("panel-open");
+  elements.appsPanel?.classList.remove("panel-open");
+  elements.filesPanel?.classList.remove("panel-open");
   elements.shortcutsPanel?.classList.remove("panel-open");
   elements.controlsPanel?.classList.remove("panel-open");
   elements.settingsPanel?.classList.remove("panel-open");
@@ -5150,6 +5714,17 @@ function openDestination(destination, { toggle = false } = {}) {
 
   if (next === "windows") {
     elements.windowDrawer.classList.add("open", "panel-open");
+  } else if (next === "apps") {
+    elements.appsPanel?.classList.add("panel-open");
+    if (!state.appsLoaded && !state.appsLoading) {
+      loadApps().catch((error) => showToast(error.message));
+    }
+    if (!state.pinsLoaded) loadPins().catch(() => null);
+  } else if (next === "files") {
+    elements.filesPanel?.classList.add("panel-open");
+    if (!state.filesLoaded && !state.filesLoading) {
+      loadFiles(null).catch((error) => showToast(error.message));
+    }
   } else if (next === "keyboard") {
     openKeyboardCapture({ focusInput: false });
   } else if (next === "shortcuts") {
@@ -5231,6 +5806,46 @@ if (elements.toggleControls) {
   elements.toggleControls.addEventListener("click", toggleControls);
 }
 elements.refreshWindows.addEventListener("click", () => refreshWindows().catch((error) => showToast(error.message)));
+elements.refreshFiles?.addEventListener("click", () => loadFiles(state.filesPath).catch((error) => showToast(error.message)));
+elements.fileHome?.addEventListener("click", () => loadFiles(null).catch((error) => showToast(error.message)));
+elements.fileUp?.addEventListener("click", () => loadFiles(state.filesParent).catch((error) => showToast(error.message)));
+elements.revealCurrentFolder?.addEventListener("click", () => revealFilePath(state.filesPath).catch((error) => showToast(error.message)));
+elements.closeFiles?.addEventListener("click", () => openDestination("viewer"));
+elements.closeApps?.addEventListener("click", () => openDestination("viewer"));
+elements.refreshApps?.addEventListener("click", () => loadApps({ force: true }).catch((error) => showToast(error.message)));
+elements.appSearchInput?.addEventListener("input", () => {
+  state.appSearch = elements.appSearchInput.value || "";
+  renderApps();
+});
+elements.appSearchForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const query = (elements.appSearchInput?.value || "").trim();
+  state.appSearch = query;
+  renderApps();
+  if (looksLikeWindowsPath(query)) {
+    openDestination("files");
+    loadFiles(query).catch((error) => showToast(error.message));
+  }
+});
+elements.pinCurrentFolder?.addEventListener("click", () => {
+  if (!state.filesPath) {
+    showToast("Open a folder to pin it.");
+    return;
+  }
+  const label = state.filesBreadcrumbs.length
+    ? state.filesBreadcrumbs[state.filesBreadcrumbs.length - 1].name
+    : state.filesPath;
+  pinTarget({ kind: "folder", label, target: state.filesPath }).catch((error) => showToast(error.message));
+});
+elements.filePathForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const path = elements.filePathInput?.value.trim();
+  if (!path) {
+    loadFiles(null).catch((error) => showToast(error.message));
+    return;
+  }
+  loadFiles(path).catch((error) => showToast(error.message));
+});
 if (elements.focusWindow) {
   elements.focusWindow.addEventListener("click", () => focusSelectedWindow(false).catch((error) => showToast(error.message)));
 }
@@ -5320,6 +5935,9 @@ if (elements.followMouse) {
 elements.refreshTrustedDevices.addEventListener("click", () => refreshTrustedDevices().catch((error) => showToast(error.message)));
 if (elements.restoreWindow) {
   elements.restoreWindow.addEventListener("click", () => restoreSelectedWindow().catch((error) => showToast(error.message)));
+}
+if (elements.closeWindow) {
+  elements.closeWindow.addEventListener("click", () => closeSelectedWindow().catch((error) => showToast(error.message)));
 }
 elements.toggleKeyboard.addEventListener("click", () => {
   if (usesMobileShell()) openDestination("keyboard", { toggle: true });
@@ -5448,6 +6066,11 @@ document.addEventListener("click", (event) => {
   const bottomAction = event.target.closest("[data-bottom-action]");
   if (bottomAction) {
     executeBottomNavAction(bottomAction.dataset.bottomAction).catch((error) => showToast(error.message));
+    return;
+  }
+  const quickAction = event.target.closest("[data-quick-action]");
+  if (quickAction) {
+    runQuickAction(quickAction.dataset.quickAction).catch((error) => showToast(error.message));
     return;
   }
   const destinationButton = event.target.closest("[data-destination]");
@@ -5599,6 +6222,6 @@ if (elements.controlBar) {
 loadGestureShortcut();
 syncKeyboardComposerVisibility();
 const initialDestination = window.location.hash.slice(1);
-if (["viewer", "windows", "keyboard", "shortcuts", "controls", "settings"].includes(initialDestination)) {
+if (["viewer", "windows", "apps", "files", "keyboard", "shortcuts", "controls", "settings"].includes(initialDestination)) {
   openDestination(initialDestination);
 }

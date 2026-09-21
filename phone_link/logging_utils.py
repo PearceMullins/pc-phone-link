@@ -58,9 +58,13 @@ def log_event(
 
 def summarize_http_request(request: Any) -> dict[str, Any]:
     query_params: dict[str, Any] = {}
+    url = getattr(request, "url", None)
+    request_path = getattr(url, "path", None)
     raw_query = getattr(request, "query_params", None)
     if raw_query is not None:
         for key, value in _iter_multi_items(raw_query):
+            if _is_redacted_query_key(request_path, key):
+                value = "[redacted]"
             if key in query_params:
                 existing = query_params[key]
                 if isinstance(existing, list):
@@ -71,10 +75,9 @@ def summarize_http_request(request: Any) -> dict[str, Any]:
                 query_params[key] = value
 
     client = getattr(request, "client", None)
-    url = getattr(request, "url", None)
     return {
         "method": getattr(request, "method", None),
-        "path": getattr(url, "path", None),
+        "path": request_path,
         "query": query_params,
         "client_host": getattr(client, "host", None),
         "scheme": getattr(url, "scheme", None),
@@ -82,11 +85,20 @@ def summarize_http_request(request: Any) -> dict[str, Any]:
     }
 
 
+def _is_redacted_query_key(request_path: str | None, key: Any) -> bool:
+    normalized_key = str(key).strip().casefold()
+    if normalized_key == "path":
+        return True
+    return request_path == "/api/apps/icon" and normalized_key == "id"
+
+
 def summarize_websocket(websocket: Any) -> dict[str, Any]:
     query_params: dict[str, Any] = {}
     raw_query = getattr(websocket, "query_params", None)
     if raw_query is not None:
         for key, value in _iter_multi_items(raw_query):
+            if str(key).strip().casefold() == "path":
+                value = "[redacted]"
             if key in query_params:
                 existing = query_params[key]
                 if isinstance(existing, list):

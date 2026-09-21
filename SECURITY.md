@@ -17,6 +17,8 @@ PC Phone Link is designed for **local network use** on a trusted home or office 
 - **Paired browser tokens** — Required for control APIs and streaming after the first connect
 - **Trusted device list** — Paired browsers are stored locally; you can revoke access
 
+A paired phone has remote-control authority: it can view window streams, send input, browse filesystem names, reveal files in File Explorer, open files with their default apps, launch apps from the Start Menu and desktop, run fixed quick actions, request app windows to close, and use configured system controls. Only pair devices and people you trust. File-browser paths, icon ids, and launch targets are redacted or summarized in request logs; pinned shortcuts are stored locally on the PC and scoped to the paired phone that created them.
+
 ### What the app does not provide
 
 - **No HTTPS/TLS** — Traffic between phone and PC is plain HTTP on your LAN

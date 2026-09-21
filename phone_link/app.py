@@ -13,8 +13,8 @@ from typing import Any
 
 import pywintypes
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -42,11 +42,21 @@ from .gesture_diagnostics import (
 )
 from .network import discover_access_urls
 from .streaming import MAX_STREAM_FPS, register_stream_routes
+from .app_launcher import (
+    LaunchError,
+    icon_png_bytes,
+    list_launch_targets,
+    launch_target,
+    run_quick_action,
+)
+from .file_browser import FileBrowserError, list_directory, open_path, reveal_in_file_explorer
+from .pins_store import PinError, add_pin, list_pins, remove_pin
 from .windows_host import (
     FULLSCREEN_TARGET_HWND,
     WindowLookupError,
     adjust_system_text_size,
     cancel_active_touch,
+    close_window,
     fit_window_to_viewport,
     focus_window,
     get_system_text_scale,
@@ -109,6 +119,25 @@ class GameKeyRequest(BaseModel):
 class PhoneFitRequest(BaseModel):
     viewport_width: int
     viewport_height: int
+
+
+class FilePathRequest(BaseModel):
+    path: str = Field(min_length=1, max_length=32767)
+
+
+class LaunchRequest(BaseModel):
+    target: str = Field(min_length=1, max_length=32767)
+    label: str = Field(default="", max_length=80)
+
+
+class QuickActionRequest(BaseModel):
+    action: str = Field(min_length=1, max_length=40)
+
+
+class PinRequest(BaseModel):
+    kind: str = Field(min_length=1, max_length=20)
+    label: str = Field(min_length=1, max_length=80)
+    target: str = Field(min_length=1, max_length=32767)
 
 
 class PowerRequest(BaseModel):
@@ -206,6 +235,8 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
     @app.middleware("http")
     async def disable_ui_caching(request: Request, call_next):
         response = await call_next(request)
+        if request.url.path == "/api/apps/icon":
+            return response
         if request.url.path == "/" or request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
@@ -330,6 +361,101 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
         _require_token(app, request)
         return {"windows": [window.to_dict() for window in list_windows()]}
 
+    @app.get("/api/files")
+    async def files(request: Request, path: str | None = None) -> dict[str, Any]:
+        _require_token(app, request)
+        try:
+            return list_directory(path)
+        except FileBrowserError as error:
+            raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+
+    @app.post("/api/files/reveal")
+    async def reveal_file(payload: FilePathRequest, request: Request) -> dict[str, Any]:
+        _require_token(app, request)
+        try:
+            return reveal_in_file_explorer(payload.path)
+        except FileBrowserError as error:
+            raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+
+    @app.post("/api/files/open")
+    async def open_file(payload: FilePathRequest, request: Request) -> dict[str, Any]:
+        _require_token(app, request)
+        log_event("host", "file-open-requested", {"item_type": "folder" if _is_probably_directory(payload.path) else "file"})
+        try:
+            return open_path(payload.path)
+        except FileBrowserError as error:
+            raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+
+    @app.get("/api/apps")
+    async def apps(request: Request, query: str = "", refresh: bool = False) -> dict[str, Any]:
+        _require_token(app, request)
+        return list_launch_targets(query=query, force=refresh)
+
+    @app.get("/api/apps/icon")
+    def app_icon(request: Request, app_id: str = Query(default="", alias="id")) -> Response:
+        _require_token(app, request)
+        png = icon_png_bytes(app_id)
+        if png is None:
+            raise HTTPException(status_code=404, detail="That icon is not available.")
+        return Response(
+            content=png,
+            media_type="image/png",
+            headers={"Cache-Control": "private, max-age=86400"},
+        )
+
+    @app.post("/api/launch")
+    async def launch(payload: LaunchRequest, request: Request) -> dict[str, Any]:
+        _require_token(app, request)
+        log_event("host", "launch-requested", {"label": payload.label, "target_kind": Path(payload.target).suffix.casefold()})
+        try:
+            result = launch_target(payload.target, label=payload.label)
+        except LaunchError as error:
+            log_event("host", "launch-failed", {"label": payload.label, "error": error}, level="error")
+            raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+        return result
+
+    @app.post("/api/quick-actions")
+    async def quick_action(payload: QuickActionRequest, request: Request) -> dict[str, Any]:
+        _require_token(app, request)
+        log_event("host", "quick-action-requested", {"action": payload.action})
+        try:
+            return run_quick_action(payload.action)
+        except LaunchError as error:
+            raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.get("/api/pins")
+    async def pins(request: Request) -> dict[str, Any]:
+        token = _require_token(app, request)
+        try:
+            return {"pins": list_pins(_trusted_device_id(token))}
+        except PinError as error:
+            raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+
+    @app.post("/api/pins")
+    async def create_pin(payload: PinRequest, request: Request) -> dict[str, Any]:
+        token = _require_token(app, request)
+        try:
+            entries = add_pin(
+                _trusted_device_id(token),
+                kind=payload.kind,
+                label=payload.label,
+                target=payload.target,
+            )
+        except PinError as error:
+            raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+        return {"ok": True, "pins": entries}
+
+    @app.delete("/api/pins/{pin_id}")
+    async def delete_pin(pin_id: str, request: Request) -> dict[str, Any]:
+        token = _require_token(app, request)
+        try:
+            entries = remove_pin(_trusted_device_id(token), pin_id)
+        except PinError as error:
+            raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+        return {"ok": True, "pins": entries}
+
     @app.post("/api/system/power")
     async def system_power(payload: PowerRequest, request: Request) -> dict[str, bool]:
         _require_token(app, request)
@@ -453,6 +579,17 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
         window_payload = window_to_dict(hwnd)
         log_event("host", "window-restore-finished", {"hwnd": hwnd, "window": _window_log_summary(window_payload)})
         return {"window": window_payload}
+
+    @app.post("/api/windows/{hwnd}/close")
+    async def close_app_window(hwnd: int, request: Request) -> dict[str, bool]:
+        _require_token(app, request)
+        if hwnd == FULLSCREEN_TARGET_HWND:
+            raise HTTPException(status_code=400, detail="Fullscreen capture is not an app window.")
+        window_result: dict[str, Any] = {}
+        _handle_window_action(lambda: window_result.update(window_to_dict(hwnd)))
+        log_event("host", "window-close-requested", {"hwnd": hwnd, "window": _window_log_summary(window_result)})
+        _handle_window_action(lambda: close_window(hwnd))
+        return {"ok": True}
 
     @app.post("/api/windows/{hwnd}/phone-fit")
     async def phone_fit(hwnd: int, payload: PhoneFitRequest, request: Request) -> dict[str, Any]:
@@ -853,6 +990,13 @@ def _append_host_event(
     if details:
         payload["payload"] = details
     log_event("host", event, payload)
+
+
+def _is_probably_directory(path: str) -> bool:
+    try:
+        return Path(path).is_dir()
+    except OSError:
+        return False
 
 
 def _window_log_summary(window_payload: dict[str, Any]) -> dict[str, Any]:

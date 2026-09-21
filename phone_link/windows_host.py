@@ -289,6 +289,21 @@ GAME_MOVEMENT_KEYS: dict[str, int] = {
     "s": 0x53,
     "d": 0x44,
 }
+SHORTCUT_KEYS: dict[str, int] = {
+    "alt": win32con.VK_MENU,
+    "ctrl": win32con.VK_CONTROL,
+    "d": 0x44,
+    "e": 0x45,
+    "esc": win32con.VK_ESCAPE,
+    "l": 0x4C,
+    "n": 0x4E,
+    "r": 0x52,
+    "s": 0x53,
+    "shift": win32con.VK_SHIFT,
+    "tab": win32con.VK_TAB,
+    "win": win32con.VK_LWIN,
+    "x": 0x58,
+}
 _GAME_SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
 PHONE_FIT_SNAPSHOTS: dict[int, PhoneFitSnapshot] = {}
@@ -416,6 +431,21 @@ def focus_window(hwnd: int, maximize: bool = False) -> None:
 
 def maximize_window(hwnd: int) -> None:
     focus_window(hwnd, maximize=True)
+
+
+def close_window(hwnd: int) -> None:
+    if _is_fullscreen_target(hwnd):
+        raise ValueError("Fullscreen capture is not an app window.")
+
+    ensured = _ensure_window(hwnd)
+    title = win32gui.GetWindowText(ensured).strip() or "Window"
+    win32gui.PostMessage(ensured, win32con.WM_CLOSE, 0, 0)
+    PHONE_FIT_SNAPSHOTS.pop(ensured, None)
+    log_event(
+        "windows-host",
+        "window-close-requested",
+        {"hwnd": ensured, "title": title},
+    )
 
 
 def restore_window(hwnd: int) -> None:
@@ -827,6 +857,21 @@ def press_special_key(hwnd: int, key_name: str) -> None:
         "special-key-pressed",
         {"hwnd": hwnd, "key": normalized},
     )
+
+
+def press_key_chord(key_names: list[str]) -> None:
+    """Press a combination of named keys such as Win+D for quick actions."""
+    keys: list[int] = []
+    for key_name in key_names:
+        normalized = str(key_name).strip().lower()
+        if normalized not in SHORTCUT_KEYS:
+            raise ValueError(f"Unsupported shortcut key: {key_name}")
+        keys.append(SHORTCUT_KEYS[normalized])
+    if not keys:
+        raise ValueError("At least one shortcut key is required.")
+
+    _press_key_chord(keys)
+    log_event("windows-host", "shortcut-keys-pressed", {"keys": [str(key).strip().lower() for key in key_names]})
 
 
 def handle_game_key(

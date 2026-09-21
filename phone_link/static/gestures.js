@@ -61,6 +61,20 @@
     return { active: false, dragIndex: -1, anchorIndex: -1 };
   }
 
+  // After both fingers arm: first-finger move = left-click file drag; second = scroll.
+  function classifyHoldAndDrag(armA, armB, currentA, currentB, holdSlop = 10, dragThreshold = 6) {
+    const holdDrag = isHoldAndDragScroll(armA, armB, currentA, currentB, holdSlop, dragThreshold);
+    if (!holdDrag.active) {
+      return { active: false, mode: null, dragIndex: -1, anchorIndex: -1 };
+    }
+    return {
+      active: true,
+      mode: holdDrag.dragIndex === 0 ? "drag" : "scroll",
+      dragIndex: holdDrag.dragIndex,
+      anchorIndex: holdDrag.anchorIndex,
+    };
+  }
+
   return {
     distance,
     midpoint,
@@ -68,5 +82,6 @@
     classifyTwoFingerGesture,
     isParallelTwoFingerDrag,
     isHoldAndDragScroll,
+    classifyHoldAndDrag,
   };
 }));

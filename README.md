@@ -33,6 +33,10 @@ Stream individual windows or your full desktop, send touch and keyboard input, m
 ## Features
 
 - **Window streaming** — Capture a single app window or fullscreen desktop with adaptive WebSocket streaming and MJPEG fallback
+- **App launcher and search** — Launch Start Menu and desktop apps with real icons, focus already-running apps, run quick actions (Show desktop, Task View, Start, Run dialog, Lock, File Explorer, Task Manager, Settings, Snipping Tool), and search apps plus open windows from one panel
+- **Pinned shortcuts** — Pin apps and folders per paired phone for one-tap access from the Apps panel
+- **Mobile file browser** — Browse PC drives and folders from the phone UI, use an address bar and breadcrumbs, reveal any folder or file in Windows File Explorer, and open files with their Windows default app
+- **Close windows remotely** — Request a normal close for any listed app window, including File Explorer; apps can still show their own unsaved-work prompt on the PC
 - **Phone controls** — App touch, Mouse trackpad, persistent Game movement controls, viewer pan, hold-to-arm one-finger-drag scroll, keyboard, special keys, and text input
 - **Window management** — List, focus, maximize, restore, and Phone Fit resize
 - **Connect code pairing** — Desktop GUI and phone show the same 4-digit code; tap Connect after confirming they match; remove connected phones from the PC window
@@ -154,9 +158,18 @@ Once paired, the phone browser is your remote control.
 2. The viewer opens on **Full screen** (desktop capture) by default; open **Windows** anytime to switch to a specific app
 3. After activation succeeds, PC Phone Link closes Windows, opens Viewer, and starts the stream
 
+### Browse files and close windows
+
+1. Open **Windows**, then tap **Files** (or add Files to the configurable bottom bar)
+2. Browse from **This PC**, use **Up** or breadcrumbs, or enter a folder path
+3. Tap a folder to browse it; tap **On PC** to open that folder or select that file in Windows File Explorer
+4. Tap **Close** beside any app in Windows, or **Close window** under Controls for the selected app
+
+Close sends the standard Windows close request. If an app has unsaved work, finish its confirmation prompt on the PC or through Viewer.
+
 Viewer focus and zoom remain stable through reconnects, stream refreshes, keyboard changes, navigation, and phone rotation. **Phone Fit** resizes the PC window only when explicitly requested; viewport changes never trigger an automatic refit.
 
-Phones and iPads default to Full screen, Windows, Keyboard, Shortcuts, Controls, and Settings in bottom bar. **Shortcuts** opens a thumb-reachable bottom sheet with persistent pointer modes: Gestures, Left click, Right click, Double left click, Scroll, Click + drag, Pan view, and Zoom view. Gestures restores normal touch controls. Choosing any mode immediately returns to PC view; mode stays enabled across uses and reloads until another is chosen. Drag modes start on touch-down, continue even when browser pointer capture is unavailable, and suppress competing viewer gestures. Scroll coalesces updates to avoid network backlog; Click + drag always holds the Windows left mouse button; Pan view raises a fit-sized view to 2x before moving it; Zoom view responds without a snap dead zone. Tap another active destination again to hide it. **Full screen** selects whole Windows desktop capture; second tap restores previous app or closes desktop stream when no prior app exists. It never requests browser fullscreen. Settings lets each phone keep up to three optional shortcuts, reorder them, or reset defaults. Shortcuts, Controls, and Settings stay fixed and cannot be removed. Optional catalog includes destinations, gesture help, click modes, Fit, safe Power-controls access, and input-mode toggle. **Settings > PC power** exposes Lock, Sleep, Restart, and Shut down; destructive actions remain marked and confirmed.
+Phones and iPads default to Full screen, Windows, Keyboard, Shortcuts, Controls, and Settings in bottom bar. **Shortcuts** opens a thumb-reachable bottom sheet with persistent pointer modes: Gestures, Left click, Right click, Double left click, Scroll, Click + drag, Pan view, and Zoom view. Gestures restores normal touch controls. Choosing any mode immediately returns to PC view; mode stays enabled across uses and reloads until another is chosen. Drag modes start on touch-down, continue even when browser pointer capture is unavailable, and suppress competing viewer gestures. Scroll coalesces updates to avoid network backlog; Click + drag always holds the Windows left mouse button; Pan view raises a fit-sized view to 2x before moving it; Zoom view responds without a snap dead zone. Tap another active destination again to hide it. **Full screen** selects whole Windows desktop capture; second tap restores previous app or closes desktop stream when no prior app exists. It never requests browser fullscreen. Settings lets each phone keep up to three optional shortcuts, reorder them, or reset defaults. Shortcuts, Controls, and Settings stay fixed and cannot be removed. Optional catalog includes Apps, Files, other destinations, gesture help, click modes, Fit, safe Power-controls access, and input-mode toggle. **Settings > PC power** exposes Lock, Sleep, Restart, and Shut down; destructive actions remain marked and confirmed.
 
 ### Input modes
 

@@ -119,12 +119,14 @@ def main() -> None:
                     {"features": [{"name": "display-mode", "value": "standalone" if standalone else "browser"}]},
                 )
                 time.sleep(0.1)
-                for destination in ("viewer", "windows", "keyboard", "shortcuts", "controls", "settings"):
+                for destination in ("viewer", "windows", "files", "keyboard", "shortcuts", "controls", "settings"):
                     report = browser.evaluate(
                         f"""(() => {{
+                          if ({destination!r} === 'files') state.filesLoaded = true;
                           openDestination({destination!r});
                           if ({destination!r} === 'shortcuts') elements.shortcutMenu.scrollTop = elements.shortcutMenu.scrollHeight;
                           const panel = {destination!r} === 'windows' ? elements.windowDrawer
+                            : {destination!r} === 'files' ? elements.filesPanel
                             : {destination!r} === 'shortcuts' ? elements.shortcutsPanel
                             : {destination!r} === 'controls' ? elements.controlsPanel
                             : {destination!r} === 'settings' ? elements.settingsPanel : null;
@@ -149,7 +151,7 @@ def main() -> None:
                             panelRight: visible?.right ?? innerWidth,
                             panelOverflow: panel ? panel.scrollWidth - panel.clientWidth : 0,
                             keyboardOpen: !elements.keyboardPanel.classList.contains('hidden'),
-                            controls: ['bottomNavEditor','bottomNavAdd','bottomNavReset','clickMode','rightClickMode','doubleClickMode','panMode','dragMode','scrollMode','zoomMode','scrollUp','scrollDown','focusWindow','maximizeWindow','restoreWindow','shortcutsPanel','shortcutMenu','activeShortcut','fitShape','streamFps','streamWidth','textScale','refreshTrustedDevices','voiceInput','powerToggle','fitToggle','toggleKeyboard','toggleControls','gameControls','gameInputStyle','gameUiSize','gameUiSizeValue','gameUiSizePreview','editGameLayout','resetGameLayout','doneGameLayout','resetGameLayoutOverlay','gamePad','gameJoystick','gameMouseJoystick','gameMouseJoystickKnob'].every(id => document.getElementById(id)) && document.querySelectorAll('[data-game-layout-group]').length === 3 && document.querySelectorAll('[data-game-mouse-button]').length === 3 && document.querySelectorAll('[data-special-key]').length === 8 && document.querySelectorAll('[data-pointer-shortcut]').length === 8 && Array.from(elements.controlMode.options).some(option => option.value === 'game'),
+                            controls: ['bottomNavEditor','bottomNavAdd','bottomNavReset','clickMode','rightClickMode','doubleClickMode','panMode','dragMode','scrollMode','zoomMode','scrollUp','scrollDown','focusWindow','maximizeWindow','restoreWindow','closeWindow','filesPanel','fileList','filePathInput','closeFiles','shortcutsPanel','shortcutMenu','activeShortcut','fitShape','streamFps','streamWidth','textScale','refreshTrustedDevices','voiceInput','powerToggle','fitToggle','toggleKeyboard','toggleControls','gameControls','gameInputStyle','gameUiSize','gameUiSizeValue','gameUiSizePreview','editGameLayout','resetGameLayout','doneGameLayout','resetGameLayoutOverlay','gamePad','gameJoystick','gameMouseJoystick','gameMouseJoystickKnob'].every(id => document.getElementById(id)) && document.querySelectorAll('[data-game-layout-group]').length === 3 && document.querySelectorAll('[data-game-mouse-button]').length === 3 && document.querySelectorAll('[data-special-key]').length === 8 && document.querySelectorAll('[data-pointer-shortcut]').length === 8 && Array.from(elements.controlMode.options).some(option => option.value === 'game'),
                             shortcutBottom: {destination!r} === 'shortcuts' ? elements.shortcutMenu.lastElementChild.getBoundingClientRect().bottom : 0,
                             bottomActions: Array.from(elements.mobileNav.querySelectorAll('[data-bottom-action]')).map(button => button.dataset.bottomAction),
                             mandatoryEnabled: ['shortcuts','controls','settings'].every(id => !elements.mobileNav.querySelector(`[data-bottom-action="${id}"]`)?.disabled),
@@ -870,7 +872,7 @@ def main() -> None:
                   setCameraFocus(0.37, 0.74);
                   const before = { focus: { ...state.cameraFocus }, scale: state.cameraScale };
                   renderWindowList();
-                  elements.windowList.querySelector('.window-card').click();
+                  elements.windowList.querySelector('.window-card-select').click();
                   for (let attempt = 0; attempt < 20 && state.currentDestination !== 'viewer'; attempt += 1) {
                     await new Promise(resolve => setTimeout(resolve, 0));
                   }
@@ -936,6 +938,157 @@ def main() -> None:
             assert selection_report["explicitMouseFollow"]["focus"] == {"x": 0.82, "y": 0.22}, selection_report
             assert selection_report["explicitMouseFollow"]["scale"] == selection_report["stable"]["scale"], selection_report
             assert selection_report["phoneFitCalls"] == [], selection_report
+
+            files_report = browser.evaluate(
+                """(async () => {
+                  const realApiFetch = apiFetch;
+                  const realConfirm = window.confirm;
+                  const calls = [];
+                  const appWindow = { hwnd: 888, title: 'File Explorer', process_name: 'explorer.exe', bounds: { width: 1000, height: 700 } };
+                  apiFetch = async (path) => {
+                    calls.push(path);
+                    if (path === '/api/files') return {
+                      path: null, parent: null, breadcrumbs: [], truncated: false,
+                      entries: [{ name: 'Demo', path: 'C:/Demo', is_directory: true, is_location: true }],
+                    };
+                    if (path.startsWith('/api/files?')) return {
+                      path: 'C:/Demo', parent: 'C:/', breadcrumbs: [{ name: 'C:', path: 'C:/' }, { name: 'Demo', path: 'C:/Demo' }], truncated: false,
+                      entries: [{ name: 'report.txt', path: 'C:/Demo/report.txt', is_directory: false, size: 2048, modified_at: '2026-08-12T12:00:00Z' }],
+                    };
+                    if (path === '/api/files/reveal') return { ok: true };
+                    if (path === '/api/windows/888/close') return { ok: true };
+                    if (path === '/api/windows') return { windows: [appWindow] };
+                    return {};
+                  };
+                  window.confirm = () => true;
+                  state.filesLoaded = false;
+                  state.filesEntries = [];
+                  state.filesPath = null;
+                  openDestination('files');
+                  for (let attempt = 0; attempt < 30 && !state.filesLoaded; attempt += 1) await new Promise(resolve => setTimeout(resolve, 0));
+                  const root = {
+                    destination: state.currentDestination,
+                    panelOpen: elements.filesPanel.classList.contains('panel-open'),
+                    rows: elements.fileList.querySelectorAll('.file-entry').length,
+                  };
+                  elements.fileList.querySelector('.file-entry-main').click();
+                  for (let attempt = 0; attempt < 30 && state.filesPath !== 'C:/Demo'; attempt += 1) await new Promise(resolve => setTimeout(resolve, 0));
+                  const folder = {
+                    path: state.filesPath,
+                    address: elements.filePathInput.value,
+                    rows: elements.fileList.querySelectorAll('.file-entry').length,
+                    upEnabled: !elements.fileUp.disabled,
+                  };
+                  elements.fileList.querySelector('.file-entry-main').click();
+                  for (let attempt = 0; attempt < 30 && !calls.includes('/api/files/reveal'); attempt += 1) await new Promise(resolve => setTimeout(resolve, 0));
+                  elements.closeFiles.click();
+                  const closedPanel = state.currentDestination === 'viewer' && !elements.filesPanel.classList.contains('panel-open');
+
+                  state.windows = [appWindow];
+                  renderWindowList();
+                  elements.windowList.querySelector('.window-close-button').click();
+                  for (let attempt = 0; attempt < 30 && !calls.includes('/api/windows/888/close'); attempt += 1) await new Promise(resolve => setTimeout(resolve, 0));
+                  await new Promise(resolve => setTimeout(resolve, 400));
+                  const close = {
+                    call: calls.includes('/api/windows/888/close'),
+                    confirmText: true,
+                    closeButton: Boolean(elements.windowList.querySelector('.window-close-button')),
+                  };
+                  apiFetch = realApiFetch;
+                  window.confirm = realConfirm;
+                  state.windows = [];
+                  state.filesEntries = [];
+                  state.filesLoaded = false;
+                  renderWindowList();
+                  renderFileBrowser();
+                  return { root, folder, closedPanel, revealed: calls.includes('/api/files/reveal'), close };
+                })()""",
+                await_promise=True,
+            )
+            assert files_report["root"] == {"destination": "files", "panelOpen": True, "rows": 1}, files_report
+            assert files_report["folder"] == {"path": "C:/Demo", "address": "C:/Demo", "rows": 1, "upEnabled": True}, files_report
+            assert files_report["revealed"] and files_report["closedPanel"], files_report
+            assert files_report["close"] == {"call": True, "confirmText": True, "closeButton": True}, files_report
+
+            apps_report = browser.evaluate(
+                """(async () => {
+                  const realApiFetch = apiFetch;
+                  const calls = [];
+                  const appWindow = { hwnd: 889, title: 'File Explorer', process_name: 'explorer.exe', bounds: { width: 1000, height: 700 } };
+                  apiFetch = async (path, options = {}) => {
+                    calls.push(path);
+                    if (path === '/api/apps') return {
+                      apps: [
+                        { id: 'a1', name: 'Notepad', target: 'C:/Windows/notepad.exe', source: 'Start Menu', icon_url: '/api/apps/icon?id=a1', running_hwnd: null, running_title: '' },
+                        { id: 'a2', name: 'Calculator', target: 'C:/Windows/calc.exe', source: 'Start Menu', icon_url: '/api/apps/icon?id=a2', running_hwnd: 889, running_title: 'File Explorer' },
+                      ],
+                      quick_actions: [
+                        { id: 'show_desktop', label: 'Show desktop', icon: 'D' },
+                        { id: 'run_dialog', label: 'Run dialog', icon: 'R' },
+                      ],
+                      total: 2,
+                    };
+                    if (path === '/api/pins') {
+                      if (options.method === 'POST') return { ok: true, pins: [{ id: 'p1', kind: 'app', label: 'Notepad', target: 'C:/Windows/notepad.exe' }] };
+                      return { pins: [] };
+                    }
+                    if (path === '/api/launch' || path === '/api/quick-actions') throw new Error('blocked in smoke test');
+                    if (path === '/api/windows') return { windows: [appWindow] };
+                    return {};
+                  };
+                  state.appsLoaded = false;
+                  state.apps = [];
+                  state.quickActions = [];
+                  state.pins = [];
+                  state.pinsLoaded = false;
+                  state.appSearch = '';
+                  state.windows = [appWindow];
+                  openDestination('apps');
+                  for (let attempt = 0; attempt < 40 && !state.appsLoaded; attempt += 1) await new Promise(resolve => setTimeout(resolve, 0));
+                  const opened = {
+                    destination: state.currentDestination,
+                    panelOpen: elements.appsPanel.classList.contains('panel-open'),
+                    apps: elements.appList.querySelectorAll('.app-entry:not(.window-result)').length,
+                    quickActions: elements.quickActions.querySelectorAll('.quick-action').length,
+                  };
+                  elements.appSearchInput.value = 'file explorer';
+                  elements.appSearchInput.dispatchEvent(new Event('input'));
+                  const filtered = {
+                    windows: elements.appList.querySelectorAll('.window-result').length,
+                    apps: elements.appList.querySelectorAll('.app-entry:not(.window-result)').length,
+                  };
+                  elements.appSearchInput.value = '';
+                  elements.appSearchInput.dispatchEvent(new Event('input'));
+                  elements.appList.querySelector('.app-entry:not(.window-result) .app-entry-main').click();
+                  elements.quickActions.querySelector('.quick-action').click();
+                  for (let attempt = 0; attempt < 30 && (!calls.includes('/api/launch') || !calls.includes('/api/quick-actions')); attempt += 1) await new Promise(resolve => setTimeout(resolve, 0));
+                  elements.appList.querySelector('.app-pin-button').click();
+                  for (let attempt = 0; attempt < 30 && !elements.pinnedItems.querySelector('.pinned-chip'); attempt += 1) await new Promise(resolve => setTimeout(resolve, 0));
+                  const actions = {
+                    launched: calls.includes('/api/launch'),
+                    quickAction: calls.includes('/api/quick-actions'),
+                    pinnedChips: elements.pinnedItems.querySelectorAll('.pinned-chip').length,
+                  };
+                  openDestination('viewer');
+                  const closed = state.currentDestination === 'viewer' && !elements.appsPanel.classList.contains('panel-open');
+                  apiFetch = realApiFetch;
+                  state.appsLoaded = false;
+                  state.apps = [];
+                  state.quickActions = [];
+                  state.pins = [];
+                  state.pinsLoaded = false;
+                  state.appSearch = "";
+                  state.windows = [];
+                  renderApps();
+                  renderWindowList();
+                  return { opened, filtered, actions, closed };
+                })()""",
+                await_promise=True,
+            )
+            assert apps_report["opened"] == {"destination": "apps", "panelOpen": True, "apps": 2, "quickActions": 2}, apps_report
+            assert apps_report["filtered"] == {"windows": 1, "apps": 0}, apps_report
+            assert apps_report["actions"] == {"launched": True, "quickAction": True, "pinnedChips": 1}, apps_report
+            assert apps_report["closed"] is True, apps_report
 
             nav_report = browser.evaluate(
                 """(async () => {
@@ -1021,11 +1174,14 @@ def main() -> None:
                       ? !elements.keyboardPanel.classList.contains('hidden')
                       : id === 'shortcuts'
                         ? elements.shortcutsPanel.classList.contains('panel-open')
+                      : id === 'apps'
+                        ? elements.appsPanel.classList.contains('panel-open')
                       : id === 'controls'
                         ? elements.controlsPanel.classList.contains('panel-open')
                         : elements.settingsPanel.classList.contains('panel-open');
+                  saveBottomNavConfig(['windows', 'apps', 'keyboard']);
                   const destinationToggles = {};
-                  for (const id of ['windows', 'keyboard', 'shortcuts', 'controls', 'settings']) {
+                  for (const id of ['windows', 'apps', 'keyboard', 'shortcuts', 'controls', 'settings']) {
                     openDestination('viewer');
                     const tapDestination = () => elements.mobileNav.querySelector(`[data-bottom-action="${id}"]`).click();
                     tapDestination();
@@ -1038,6 +1194,7 @@ def main() -> None:
                     tapDestination();
                     const hidden = state.currentDestination === 'viewer'
                       && !elements.windowDrawer.classList.contains('panel-open')
+                      && !elements.appsPanel.classList.contains('panel-open')
                       && !elements.shortcutsPanel.classList.contains('panel-open')
                       && !elements.controlsPanel.classList.contains('panel-open')
                       && !elements.settingsPanel.classList.contains('panel-open')
@@ -1552,20 +1709,30 @@ def main() -> None:
                   const jitterArmed = state.twoFingerGesture?.scrollArmed === true;
                   const readyStatus = elements.gestureStatus.textContent;
                   const readyHaptic = haptics.at(-1);
-                  e('pointermove', 31, 103, 162);
+                  e('pointermove', 32, 183, 162);
                   const scrollModeAfterDrag = state.twoFingerGesture?.mode ?? null;
                   const scrollScaleBeforeSeparation = state.cameraScale;
-                  e('pointermove', 31, 63, 162);
+                  e('pointermove', 32, 223, 162);
                   const scrollModeAfterSeparation = state.twoFingerGesture?.mode ?? null;
                   const scrollScaleAfterSeparation = state.cameraScale;
-                  e('pointerup', 32, 183, 202);
+                  e('pointerup', 31, 103, 202);
                   const scrollActions = calls.splice(0).map(item => item.action);
+
+                  e('pointerdown', 91, 100, 200);
+                  e('pointerdown', 92, 180, 200);
+                  await new Promise(resolve => setTimeout(resolve, TWO_FINGER_SCROLL_HOLD_MS + 30));
+                  e('pointermove', 91, 100, 160);
+                  const fileDragMode = state.twoFingerGesture?.mode ?? null;
+                  const fileDragStatus = elements.gestureStatus.textContent;
+                  e('pointermove', 91, 100, 140);
+                  e('pointerup', 92, 180, 200);
+                  const fileDragActions = calls.splice(0).map(item => item.action);
 
                   e('pointerdown', 51, 100, 200);
                   e('pointerdown', 52, 180, 200);
                   await new Promise(resolve => setTimeout(resolve, TWO_FINGER_SCROLL_HOLD_MS + 30));
-                  e('pointermove', 51, 100, 160);
-                  e('pointercancel', 52, 180, 200);
+                  e('pointermove', 52, 180, 160);
+                  e('pointercancel', 51, 100, 200);
                   const scrollCancelActions = calls.splice(0).map(item => item.action);
                   const scrollCancelState = { gesture: state.twoFingerGesture, active: state.activePointers.size };
 
@@ -1615,7 +1782,7 @@ def main() -> None:
                   haptic = realHaptic;
                   state.selectedWindow = null;
                   resetViewer();
-                  return { freshControls, legacyControls, savedControls, trackpadActions, touchModeStored, singleTapImmediateActions, singleTapActions, doubleTapActions, doubleTapStatus, doubleTapHaptic, doubleTapDelayedActions, farTapImmediateActions, farTapDelayedActions, lateTapActions, pendingTapCanceledByDragActions, explicitDoubleActions, explicitDoubleModeAfterTap, cancellationActions, panActions, panStartFocus, panEndFocus, boundedPanActions, boundedPanFocus, scaleOneActions, scaleOneFocus, scaleOneEndFocus, captureFailureContinued, captureFailureLogged, shortcutScrollImmediate, shortcutScrollBlocksNormalGestures, shortcutScrollActions, shortcutDragImmediate, shortcutDragActions, shortcutPanImmediate, shortcutPanMoved, shortcutPanScale, shortcutZoomImmediate, shortcutZoomScale, shortcutDiagnosticEntries, prematureMode, prematureActions, earlyReleaseActions, jitterArmed, readyStatus, readyHaptic, scrollActions, scrollModeAfterDrag, scrollModeAfterSeparation, scrollScaleBeforeSeparation, scrollScaleAfterSeparation, scrollCancelActions, scrollCancelState, pinchActions, pinchScale, pinchModeAfterSeparation, pinchModeAfterParallel, twoFingerTapActions, twoFingerTapStatus, twoFingerTapHaptic, heldTwoFingerTapActions, heldFingerActions, heldThenReleasedActions, cancelActions, diagnosticEvents, diagnosticStates, diagnosticPointerTypes };
+                  return { freshControls, legacyControls, savedControls, trackpadActions, touchModeStored, singleTapImmediateActions, singleTapActions, doubleTapActions, doubleTapStatus, doubleTapHaptic, doubleTapDelayedActions, farTapImmediateActions, farTapDelayedActions, lateTapActions, pendingTapCanceledByDragActions, explicitDoubleActions, explicitDoubleModeAfterTap, cancellationActions, panActions, panStartFocus, panEndFocus, boundedPanActions, boundedPanFocus, scaleOneActions, scaleOneFocus, scaleOneEndFocus, captureFailureContinued, captureFailureLogged, shortcutScrollImmediate, shortcutScrollBlocksNormalGestures, shortcutScrollActions, shortcutDragImmediate, shortcutDragActions, shortcutPanImmediate, shortcutPanMoved, shortcutPanScale, shortcutZoomImmediate, shortcutZoomScale, shortcutDiagnosticEntries, prematureMode, prematureActions, earlyReleaseActions, jitterArmed, readyStatus, readyHaptic, scrollActions, scrollModeAfterDrag, scrollModeAfterSeparation, scrollScaleBeforeSeparation, scrollScaleAfterSeparation, fileDragMode, fileDragStatus, fileDragActions, scrollCancelActions, scrollCancelState, pinchActions, pinchScale, pinchModeAfterSeparation, pinchModeAfterParallel, twoFingerTapActions, twoFingerTapStatus, twoFingerTapHaptic, heldTwoFingerTapActions, heldFingerActions, heldThenReleasedActions, cancelActions, diagnosticEvents, diagnosticStates, diagnosticPointerTypes };
                 })()""",
                 await_promise=True,
             )
@@ -1665,6 +1832,9 @@ def main() -> None:
             assert gesture_report["scrollScaleAfterSeparation"] == gesture_report["scrollScaleBeforeSeparation"], gesture_report
             assert gesture_report["scrollActions"][0] == "touch_down", gesture_report
             assert "touch_move" in gesture_report["scrollActions"] and gesture_report["scrollActions"][-1] == "touch_up", gesture_report
+            assert gesture_report["fileDragMode"] == "drag" and gesture_report["fileDragStatus"] == "Drag", gesture_report
+            assert gesture_report["fileDragActions"][0] == "down", gesture_report
+            assert "move" in gesture_report["fileDragActions"] and gesture_report["fileDragActions"][-1] == "up", gesture_report
             assert gesture_report["scrollCancelActions"][0] == "touch_down" and gesture_report["scrollCancelActions"][-1] == "touch_cancel", gesture_report
             assert gesture_report["scrollCancelState"] == {"gesture": None, "active": 0}, gesture_report
             assert gesture_report["pinchModeAfterSeparation"] == "pinch" and gesture_report["pinchModeAfterParallel"] == "pinch", gesture_report

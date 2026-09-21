@@ -10,16 +10,34 @@
   <title>PC Phone Link</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="/assets/styles.css?v=20260819f">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260921a">
 </head>
 <body>
   <div id="app">
     <aside id="windowDrawer" class="window-drawer open mobile-panel" data-panel="windows" aria-label="Windows">
       <div class="drawer-header">
         <div><p class="eyebrow">PC Phone Link</p><h1>Windows</h1></div>
-        <button id="refreshWindows" class="ghost-button" type="button">Refresh</button>
+        <div class="drawer-header-actions"><button class="ghost-button" type="button" data-destination="apps">Apps</button><button class="ghost-button" type="button" data-destination="files">Files</button><button id="refreshWindows" class="ghost-button" type="button">Refresh</button></div>
       </div>
       <div id="windowList" class="window-list"></div>
+    </aside>
+
+    <aside id="appsPanel" class="mobile-panel utility-panel apps-panel" data-panel="apps" aria-label="Apps">
+      <div class="drawer-header"><div><p class="eyebrow">Launch and search</p><h1>Apps</h1></div><div class="drawer-header-actions"><button id="refreshApps" class="ghost-button" type="button">Refresh</button><button id="closeApps" class="ghost-button" type="button">Close</button></div></div>
+      <form id="appSearchForm" class="app-search-form" role="search"><label class="sr-only" for="appSearchInput">Search apps, files, and open windows</label><input id="appSearchInput" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search apps, folders, windows"><button class="primary-button" type="submit">Search</button></form>
+      <div id="quickActions" class="quick-actions" aria-label="Quick actions"></div>
+      <section id="pinnedSection" class="pinned-section" hidden><p class="eyebrow">Pinned</p><div id="pinnedItems" class="pinned-items"></div></section>
+      <p id="appsStatus" class="file-browser-status" role="status">Open Apps to list launchable apps.</p>
+      <div id="appList" class="app-list"></div>
+    </aside>
+
+    <aside id="filesPanel" class="mobile-panel utility-panel files-panel" data-panel="files" aria-label="Files">
+      <div class="drawer-header"><div><p class="eyebrow">PC file browser</p><h1>Files</h1></div><button id="closeFiles" class="ghost-button" type="button">Close</button></div>
+      <form id="filePathForm" class="file-path-form"><label class="sr-only" for="filePathInput">Folder path</label><input id="filePathInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="C:\\Users"><button class="primary-button" type="submit">Go</button></form>
+      <div class="file-toolbar"><button id="fileHome" class="ghost-button" type="button">This PC</button><button id="fileUp" class="ghost-button" type="button" disabled>Up</button><button id="revealCurrentFolder" class="ghost-button" type="button" disabled>Open on PC</button><button id="pinCurrentFolder" class="ghost-button" type="button" disabled>Pin folder</button><button id="refreshFiles" class="ghost-button" type="button">Refresh</button></div>
+      <nav id="fileBreadcrumbs" class="file-breadcrumbs" aria-label="Current folder"></nav>
+      <p id="fileBrowserStatus" class="file-browser-status" role="status">Open Files to browse this PC.</p>
+      <div id="fileList" class="file-list"></div>
     </aside>
 
     <aside id="controlsPanel" class="mobile-panel utility-panel" data-panel="controls" aria-label="Controls">
@@ -46,7 +64,7 @@
         <div class="drawer-button-row"><button id="clickMode" class="ghost-button" type="button">Click</button><button id="rightClickMode" class="ghost-button" type="button">Right-click</button><button id="doubleClickMode" class="ghost-button" type="button">Double-click</button></div>
         <div class="drawer-button-row"><button id="panMode" class="ghost-button" type="button">Pan</button><button id="dragMode" class="ghost-button" type="button">Drag</button><button id="scrollMode" class="ghost-button" type="button">Scroll</button><button id="zoomMode" class="ghost-button" type="button">Zoom</button></div>
         <div class="drawer-button-row"><button id="scrollUp" class="ghost-button" type="button">Scroll up</button><button id="scrollDown" class="ghost-button" type="button">Scroll down</button></div>
-        <div class="drawer-button-row"><button id="focusWindow" class="ghost-button" type="button">Focus</button><button id="maximizeWindow" class="ghost-button" type="button">Maximize</button><button id="restoreWindow" class="ghost-button" type="button">Restore</button></div>
+        <div class="drawer-button-row"><button id="focusWindow" class="ghost-button" type="button">Focus</button><button id="maximizeWindow" class="ghost-button" type="button">Maximize</button><button id="restoreWindow" class="ghost-button" type="button">Restore</button><button id="closeWindow" class="danger-button" type="button">Close window</button></div>
         <label class="setting-label" for="fitShape"><span>Screen shape</span><strong id="fitShapeValue">Phone</strong></label>
         <select id="fitShape" class="setting-select"><option value="auto">Phone</option><option value="16-9">16:9</option><option value="16-10">16:10</option><option value="4-3">4:3</option><option value="1-1">Square</option><option value="3-4">Tall</option></select>
         <button id="applyFitShape" class="ghost-button" type="button" disabled>Apply shape</button>
@@ -91,7 +109,7 @@
     </aside>
 
     <header class="topbar" aria-label="Viewer actions">
-      <div class="topbar-actions"><button id="powerToggle" class="ghost-button" type="button" aria-expanded="false" aria-controls="powerMenu" aria-haspopup="true">Power</button><button id="fitToggle" class="ghost-button" type="button">Fit</button><button id="toggleKeyboard" class="ghost-button" type="button">Keyboard</button><button class="ghost-button desktop-panel-button" type="button" data-destination="controls">Controls</button><button class="ghost-button desktop-panel-button" type="button" data-destination="settings">Settings</button><button id="toggleControls" class="ghost-button controls-toggle-button" type="button" aria-pressed="false">Hide controls</button><div id="powerMenu" class="power-menu hidden"><button type="button" class="power-menu-item" data-power-action="lock">Lock</button><button type="button" class="power-menu-item" data-power-action="sleep">Sleep</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="restart">Restart</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="shutdown">Shut down</button></div></div>
+      <div class="topbar-actions"><button id="powerToggle" class="ghost-button" type="button" aria-expanded="false" aria-controls="powerMenu" aria-haspopup="true">Power</button><button id="fitToggle" class="ghost-button" type="button">Fit</button><button id="toggleKeyboard" class="ghost-button" type="button">Keyboard</button><button class="ghost-button desktop-panel-button" type="button" data-destination="apps">Apps</button><button class="ghost-button desktop-panel-button" type="button" data-destination="controls">Controls</button><button class="ghost-button desktop-panel-button" type="button" data-destination="settings">Settings</button><button id="toggleControls" class="ghost-button controls-toggle-button" type="button" aria-pressed="false">Hide controls</button><div id="powerMenu" class="power-menu hidden"><button type="button" class="power-menu-item" data-power-action="lock">Lock</button><button type="button" class="power-menu-item" data-power-action="sleep">Sleep</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="restart">Restart</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="shutdown">Shut down</button></div></div>
     </header>
 
     <main id="viewerShell" class="viewer-shell">
@@ -126,7 +144,7 @@
     <nav id="mobileNav" class="mobile-nav" aria-label="App navigation"></nav>
     <button id="revealControls" class="reveal-controls hidden" type="button">Show controls</button>
 
-    <dialog id="gestureHelp" class="gesture-help"><form method="dialog"><h2>Touch gestures</h2><ul><li>Tap: click</li><li>Double-tap: right-click</li><li>Quick two-finger tap: double-click</li><li>One-finger drag: pan viewer</li><li>Hold two fingers until Scroll ready, then hold one finger and drag the other: scroll PC content</li><li>Pinch: zoom viewer</li><li>Double-click next tap: send a PC double-click on your next tap</li></ul><button class="primary-button" value="close">Got it</button></form></dialog>
+    <dialog id="gestureHelp" class="gesture-help"><form method="dialog"><h2>Touch gestures</h2><ul><li>Tap: click</li><li>Double-tap: right-click</li><li>Quick two-finger tap: double-click</li><li>One-finger drag: pan viewer</li><li>Hold two fingers until Scroll ready, then drag the first finger: left-click drag (files/folders)</li><li>Hold two fingers until Scroll ready, then hold the first finger and drag the second: scroll PC content</li><li>Pinch: zoom viewer</li><li>Shortcuts or Controls Gestures buttons: choose what each tap or one-finger drag does; selection stays active until changed</li><li>Shortcuts &gt; Gestures: restore all normal gestures with no forced pointer mode</li><li>Controls &gt; Game: hold WASD pad directions or drag left movement joystick; use right joystick and click buttons for PC mouse</li></ul><button class="primary-button" value="close">Got it</button></form></dialog>
 
     <section id="authPanel" class="auth-panel"><div class="auth-card"><h2>Connect your phone</h2><p id="connectStatus" class="auth-status">Confirm session code matches PC, then tap Connect.</p><label class="device-name-field" for="pairingDeviceName"><span>This phone will appear on PC as</span><input id="pairingDeviceName" type="text" maxlength="80" autocomplete="nickname" spellcheck="false"></label><p id="connectCodeDisplay" class="connect-code">----</p><div id="pairingApprovalCodeBlock" class="approval-code-block" hidden><span>Access code for this phone</span><p id="pairingApprovalCodeDisplay" class="connect-code">----</p></div><button id="connectButton" class="primary-button" type="button">Connect</button></div></section>
     <div id="toast" class="toast hidden"></div>
@@ -134,6 +152,6 @@
   <script src="/assets/gestures.js?v=20260718a" defer></script>
   <script src="/assets/gesture-arms.js?v=20260818e" defer></script>
   <script src="/assets/game-controls.js?v=20260819f" defer></script>
-  <script src="/assets/app.js?v=20260819f" defer></script>
+  <script src="/assets/app.js?v=20260921a" defer></script>
 </body>
 </html>

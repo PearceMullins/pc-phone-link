@@ -10,7 +10,7 @@ from typing import Any
 from .logging_utils import log_event
 
 
-def _default_state_dir() -> Path:
+def state_dir() -> Path:
     if os.name == "nt":
         base_path = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
     else:
@@ -19,7 +19,7 @@ def _default_state_dir() -> Path:
 
 
 def _default_paired_browser_store_path() -> Path:
-    return _default_state_dir() / "paired_browsers.json"
+    return state_dir() / "paired_browsers.json"
 
 
 PAIRED_BROWSER_STORE_PATH = _default_paired_browser_store_path()

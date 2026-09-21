@@ -27,6 +27,9 @@ python run_phone_link.py --host 0.0.0.0 --port 8765 --fps 12
 Optional flags:
 
 - `--wake-relay-url http://192.168.1.10:8780/`
+- `--quiet` hides per-request console lines (same as `--log-level warning`); the JSONL event logs under `%LOCALAPPDATA%\PC Phone Link\logs\` keep recording
+- `--log-level critical|error|warning|info|debug|trace` sets the console level directly; access logs print only at `info` or lower
+- `--no-gui` runs without the desktop connect-code window
 
 ## Deprecated launcher entry point
 

@@ -74,6 +74,7 @@ from .windows_host import (
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
+UVICORN_LOG_LEVELS = frozenset({"critical", "error", "warning", "info", "debug", "trace"})
 
 
 class ActivateRequest(BaseModel):
@@ -824,7 +825,7 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
     return app
 
 
-def main() -> int:
+def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the PC Phone Link host app.")
     parser.add_argument("--host", default="0.0.0.0", help="Host interface to bind to.")
     parser.add_argument("--port", type=int, default=8765, help="Port to listen on.")
@@ -842,7 +843,33 @@ def main() -> int:
         action="store_true",
         help="Run without the Windows desktop connect-code window.",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--log-level",
+        default="info",
+        choices=("critical", "error", "warning", "info", "debug", "trace"),
+        help=(
+            "Console log level for the host server. Per-request console lines are hidden at "
+            "warning or above; event logs still record to the PC Phone Link log folder."
+        ),
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Shortcut for --log-level warning: hides per-request console lines.",
+    )
+    return parser
+
+
+def _resolve_console_logging(args: argparse.Namespace) -> tuple[str, bool]:
+    level = "warning" if args.quiet else str(args.log_level).strip().lower()
+    if level not in UVICORN_LOG_LEVELS:
+        level = "info"
+    return level, level in {"info", "debug", "trace"}
+
+
+def main() -> int:
+    args = _build_arg_parser().parse_args()
+    console_log_level, console_access_log = _resolve_console_logging(args)
 
     connect_code = generate_connect_code()
     wake_relay_url = _normalize_wake_relay_url(args.wake_relay_url)
@@ -886,6 +913,8 @@ def main() -> int:
     if wake_relay_url:
         print("Power on from the phone will use this wake relay endpoint:")
         print(f"  {wake_relay_url}")
+    if not console_access_log:
+        print("Per-request console logging is off. Event logs still record to the PC Phone Link log folder.")
     print("=" * 72)
 
     log_event(
@@ -899,11 +928,19 @@ def main() -> int:
             "wake_relay_configured": bool(wake_relay_url),
             "access_urls": access_urls,
             "gui_enabled": not args.no_gui,
+            "console_log_level": console_log_level,
+            "console_access_log": console_access_log,
         },
     )
 
     if args.no_gui:
-        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+        uvicorn.run(
+            app,
+            host=args.host,
+            port=args.port,
+            log_level=console_log_level,
+            access_log=console_access_log,
+        )
         return 0
 
     from .desktop_gui import run_desktop_gui
@@ -911,7 +948,12 @@ def main() -> int:
     server_thread = threading.Thread(
         target=uvicorn.run,
         args=(app,),
-        kwargs={"host": args.host, "port": args.port, "log_level": "info"},
+        kwargs={
+            "host": args.host,
+            "port": args.port,
+            "log_level": console_log_level,
+            "access_log": console_access_log,
+        },
         daemon=True,
     )
     server_thread.start()

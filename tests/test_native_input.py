@@ -235,6 +235,8 @@ def test_physical_input_passthrough_assets_are_wired() -> None:
     assert '"/api/secure-desktop"' in script
     assert "secureDesktopNotice" in script
     assert "syncSecureDesktopPolling" in script
+    assert "forceFollow" in script
+    assert 'pointerType: "mouse"' in script
     assert 'event.pointerType === "mouse"' in script
     assert "handleNativeMouseMove" in script
     assert "nativeSyncedPoint" in script

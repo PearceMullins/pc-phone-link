@@ -1,11 +1,11 @@
-const CACHE_NAME = "pc-phone-link-shell-v20260921h";
+const CACHE_NAME = "pc-phone-link-shell-v20260921i";
 const SHELL = [
-  "/assets/styles.css?v=20260921h",
+  "/assets/styles.css?v=20260921i",
   "/assets/gestures.js?v=20260718a",
   "/assets/gesture-arms.js?v=20260818e",
   "/assets/game-controls.js?v=20260819f",
-  "/assets/keyboard-keys.js?v=20260921h",
-  "/assets/app.js?v=20260921h",
+  "/assets/keyboard-keys.js?v=20260921i",
+  "/assets/app.js?v=20260921i",
   "/assets/offline.html",
   "/manifest.webmanifest",
   "/assets/icons/icon-192.png",

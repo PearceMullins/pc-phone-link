@@ -109,13 +109,17 @@ def main() -> None:
                 """(async () => {
                   const calls = [];
                   const keyCalls = [];
+                  const pointerTypes = [];
                   window.__nativeRealApiFetch = apiFetch;
                   window.__nativeRealToken = state.token;
                   apiFetch = async (path, options = {}) => {
                     const payload = options.body ? JSON.parse(options.body) : {};
                     if (path.includes('/secure-desktop')) return { active: Boolean(window.__secureDesktopActive) };
                     if (path.includes('/key-event')) keyCalls.push({ path, payload });
-                    else if (path.includes('/pointer')) calls.push({ path, payload });
+                    else if (path.includes('/pointer')) {
+                      pointerTypes.push(payload.pointer_type);
+                      calls.push({ path, payload });
+                    }
                     return { ok: true, applied: true, cursor: { x: 0.5, y: 0.5, visible: true } };
                   };
                   state.token = 'native-test-token';
@@ -187,6 +191,20 @@ def main() -> None:
                   await pollSecureDesktop();
                   const secureNoticeHidden = elements.secureDesktopNotice.classList.contains('hidden');
                   delete window.__secureDesktopActive;
+
+                  const savedFocus = { ...state.cameraFocus };
+                  setCameraScale(2, { snap: false });
+                  handlePointerResponse({ cursor: { x: 0.22, y: 0.66, visible: true } }, "move", "mouse");
+                  const followedMouse = Math.abs(state.cameraFocus.x - 0.22) < 0.01
+                    && Math.abs(state.cameraFocus.y - 0.66) < 0.01;
+                  handlePointerResponse({ cursor: { x: 0.5, y: 0.5, visible: true } }, "move", "");
+                  const followIgnoredForTouch = Math.abs(state.cameraFocus.x - 0.22) < 0.01;
+                  setCameraScale(1, { snap: false });
+                  state.cameraFocus = savedFocus;
+                  applyCameraTransform();
+                  const mousePointerTypesRecorded = pointerTypes.filter(type => type && type !== "touch");
+                  const allMousePointers = pointerTypes.includes("mouse")
+                    && mousePointerTypesRecorded.every(type => type === "mouse");
 
                   pointer('pointermove', 1, center.x, center.y);
                   await drain();
@@ -301,6 +319,7 @@ def main() -> None:
                   return {
                     defaultOff, defaultInvert, enabled, statusAfterEnable, statusAfterMouse, hoverActions,
                     echoSuppressed, realTouchActions, secureNoticeShown, secureNoticeHidden,
+                    followedMouse, followIgnoredForTouch, allMousePointers,
                     dragActions, dragReleased, unsyncedClickActions, clickActions,
                     unsyncedWheelCalls, syncedWheelCalls, invertedWheelCalls, invertStored,
                     prevented, keyActions, typedWithoutFocus, statusAfterKeys, fallbackPrevented, fallbackActions, focusStolenBack,
@@ -317,6 +336,8 @@ def main() -> None:
             assert report["echoSuppressed"], report
             assert report["realTouchActions"] == ["touch_tap"], report
             assert report["secureNoticeShown"] and report["secureNoticeHidden"], report
+            assert report["allMousePointers"], report
+            assert report["followedMouse"] and report["followIgnoredForTouch"], report
             assert report["dragActions"] == ["down_current", "move", "up_current"], report
             assert report["dragReleased"], report
             assert report["unsyncedClickActions"] == ["down", "up_current"], report

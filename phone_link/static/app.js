@@ -1565,7 +1565,7 @@ function nudgeCameraForTyping(text = "", direction = "forward") {
   queueFollowTypingLog("nudge-forward", buildFollowTypingLogDetails({ direction, textLength: text.length }));
 }
 
-function updateCursorPosition(cursor, { allowMouseFollow = false } = {}) {
+function updateCursorPosition(cursor, { allowMouseFollow = false, forceFollow = false } = {}) {
   if (!cursor) {
     return;
   }
@@ -1579,7 +1579,7 @@ function updateCursorPosition(cursor, { allowMouseFollow = false } = {}) {
     visible: Boolean(cursor.visible),
   };
 
-  if (state.followMouse && allowMouseFollow && state.cursorPosition.visible) {
+  if ((state.followMouse || forceFollow) && allowMouseFollow && state.cursorPosition.visible) {
     syncCameraToCursor();
   }
 }
@@ -2452,9 +2452,13 @@ function queueJsonPost(path, payload) {
   });
 }
 
-function handlePointerResponse(response, action = "") {
+function handlePointerResponse(response, action = "", pointerType = "") {
   if (response?.cursor) {
-    updateCursorPosition(response.cursor, { allowMouseFollow: action === "move_relative" });
+    const mousePointer = pointerType === "mouse";
+    updateCursorPosition(response.cursor, {
+      allowMouseFollow: action === "move_relative" || mousePointer,
+      forceFollow: mousePointer,
+    });
     if (action === "click_current") {
       setTypingAnchorFromCursor(response.cursor);
     }
@@ -3784,7 +3788,7 @@ function flushPendingMove() {
   state.pendingMovePayload = null;
   state.moveRequestInFlight = true;
   queueJsonPost(pointerPath(), payload)
-    .then((response) => handlePointerResponse(response, payload.action))
+    .then((response) => handlePointerResponse(response, payload.action, payload.pointer_type))
     .catch((error) => showToast(error.message))
     .finally(() => {
       state.moveRequestInFlight = false;
@@ -3802,7 +3806,7 @@ function flushPendingWheel() {
   state.pendingWheelHwnd = null;
   state.wheelRequestInFlight = true;
   queueJsonPost(`/api/windows/${hwnd}/pointer`, payload)
-    .then((response) => handlePointerResponse(response, payload.action))
+    .then((response) => handlePointerResponse(response, payload.action, payload.pointer_type))
     .catch(handlePointerError)
     .finally(() => {
       state.wheelRequestInFlight = false;
@@ -3846,7 +3850,7 @@ function sendPointer(action, payload = {}) {
     gesture_id: payload.gestureId || state.currentGestureId || diagnosticId("gesture"),
     control_mode: state.controlMode,
     pointer_count: state.activePointers.size,
-    pointer_type: state.pointerType,
+    pointer_type: typeof payload.pointerType === "string" ? payload.pointerType : state.pointerType,
     shortcut: state.gestureArm,
     sequence: state.pointerSequence,
     coalesced_count: 1,
@@ -3930,14 +3934,14 @@ function sendPointer(action, payload = {}) {
     const pendingMove = state.pendingTouchMovePayload;
     state.pendingTouchMovePayload = null;
     queueJsonPost(pointerPath(), pendingMove)
-      .then((response) => handlePointerResponse(response, pendingMove.action))
+      .then((response) => handlePointerResponse(response, pendingMove.action, pendingMove.pointer_type))
       .catch(handlePointerError);
   }
 
   queueJsonPost(pointerPath(), requestPayload)
     .then((response) => {
       logGestureDiagnostic("action-result", { request_id: requestId, action, result: "ok" });
-      return handlePointerResponse(response, action);
+      return handlePointerResponse(response, action, requestPayload.pointer_type);
     })
     .catch(handlePointerError);
 }
@@ -4546,7 +4550,7 @@ function releaseNativeMouseButton(reason) {
   state.nativeMouseLeftDown = false;
   state.nativeMousePointerId = null;
   if (!state.selectedWindow) return;
-  sendPointer("up_current");
+  sendPointer("up_current", { pointerType: "mouse" });
   logGestureDiagnostic("native-mouse-release", { reason, state: "released" });
 }
 
@@ -4559,11 +4563,11 @@ function nativePointSynced(point) {
 
 function sendNativeButtonAction(currentAction, moveAction, point) {
   if (nativePointSynced(point)) {
-    sendPointer(currentAction);
+    sendPointer(currentAction, { pointerType: "mouse" });
     return;
   }
   state.nativeSyncedPoint = { ...point };
-  sendPointer(moveAction, point);
+  sendPointer(moveAction, { ...point, pointerType: "mouse" });
 }
 
 function handleNativeMouseDown(event) {
@@ -4598,7 +4602,7 @@ function handleNativeMouseMove(event) {
   recordNativeMouseEvent(event);
   state.nativeMousePoint = point;
   state.nativeSyncedPoint = { ...point };
-  sendPointer("move", point);
+  sendPointer("move", { ...point, pointerType: "mouse" });
 }
 
 function handleNativeMouseUp(event) {
@@ -4608,7 +4612,7 @@ function handleNativeMouseUp(event) {
   state.nativeMouseLeftDown = false;
   state.nativeMousePointerId = null;
   releasePointerCaptureSafely(event.pointerId, "native-up");
-  sendPointer("up_current");
+  sendPointer("up_current", { pointerType: "mouse" });
 }
 
 function applePointerDevice() {
@@ -4639,9 +4643,9 @@ function handleNativeWheel(event) {
   if (point && !nativePointSynced(point)) {
     state.nativeMousePoint = point;
     state.nativeSyncedPoint = { ...point };
-    sendPointer("move", point);
+    sendPointer("move", { ...point, pointerType: "mouse" });
   }
-  sendPointer("wheel_current", { delta });
+  sendPointer("wheel_current", { delta, pointerType: "mouse" });
 }
 
 function secureDesktopPollingWanted() {

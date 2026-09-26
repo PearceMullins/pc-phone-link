@@ -61,6 +61,7 @@ Pair a Bluetooth mouse and keyboard with your phone, then turn on **Settings > P
 - Left click, double click, and click-and-drag work like a real mouse; the cursor does not drift between the two clicks of a double click
 - Held left button drags on the PC, so you can select text, move windows, and drag files; releasing outside the viewer still drops the drag
 - Scroll wheel reaches the PC under the PC pointer, including a second scroll without moving the cursor first; **Invert mouse wheel** in the same settings section flips the direction, and iPads start with it on to match Apple's natural scrolling default
+- The view follows the mouse when you are zoomed in, the same way **Follow mouse** works for the trackpad, so the PC pointer never leaves the screen while you work
 - **Just start typing** — no need to open the Keyboard panel or tap the viewer. Keys pass through as real Windows keystrokes, including Shift, Ctrl, Alt, Win, function keys, arrows, and the numpad, so shortcuts such as Ctrl+C, Alt+Tab, and Win+D work
 - Keys always go to the PC unless you tap into a text field. Tapping the Keyboard panel still opens the composer: tap the message box to type locally (voice and Send), or keep typing to send keystrokes straight to the PC
 - Key repeat and held keys match the physical keyboard; keys and mouse buttons release automatically when the page loses focus, you switch panels, or you turn the setting off

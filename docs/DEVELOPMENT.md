@@ -56,8 +56,21 @@ python remove_phone_link_startup.py
 ```powershell
 python -m compileall phone_link
 node --check phone_link/static/app.js
+node --check phone_link/static/keyboard-keys.js
 node --check phone_link/launcher_static/app.js
 node --check phone_link/wake_static/app.js
+node tests/test_gestures.js
+node tests/test_gesture_arms.js
+node tests/test_game_controls.js
+node tests/test_keyboard_keys.js
+python -m pytest tests
+```
+
+Optional Edge/CDP smoke scripts (require Edge and `websocket-client`):
+
+```powershell
+python tests/browser_smoke.py
+python tests/native_input_smoke.py
 ```
 
 ## Android companion

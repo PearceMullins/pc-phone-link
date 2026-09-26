@@ -38,6 +38,7 @@ Stream individual windows or your full desktop, send touch and keyboard input, m
 - **Mobile file browser** — Browse PC drives and folders from the phone UI, use an address bar and breadcrumbs, reveal any folder or file in Windows File Explorer, and open files with their Windows default app
 - **Close windows remotely** — Request a normal close for any listed app window, including File Explorer; apps can still show their own unsaved-work prompt on the PC
 - **Phone controls** — App touch, Mouse trackpad, persistent Game movement controls, viewer pan, hold-to-arm one-finger-drag scroll, keyboard, special keys, and text input
+- **Physical mouse and keyboard** — Optional passthrough for a Bluetooth mouse and keyboard paired to your phone, tablet, or iPad: pointer movement, all mouse buttons, wheel scrolling, and real Windows keystrokes with Shift, Ctrl, Alt, and Win shortcuts
 - **Works at any resolution or display scale** — Per-monitor DPI awareness keeps cursor, touch mapping, and capture in physical pixels after monitor, resolution, or scaling changes; Phone Fit restore clamps old bounds onto the current screen
 - **Window management** — List, focus, maximize, restore, and Phone Fit resize
 - **Connect code pairing** — Desktop GUI and phone show the same 4-digit code; tap Connect after confirming they match; remove connected phones from the PC window
@@ -185,6 +186,7 @@ Game control style and pad/joystick choice persist on each phone. Controls also 
 ### Keyboard and streaming
 
 - Use the keyboard panel to type into the focused PC window
+- Pair a Bluetooth mouse and keyboard with your phone and enable **Settings > Physical mouse & keyboard** to drive the PC like a native display; see [Physical mouse and keyboard](docs/USAGE.md#physical-mouse-and-keyboard)
 - Adjust **FPS** and **resolution** in stream settings (lower values help on slower Wi‑Fi)
 - **Voice input** in the browser requires HTTPS or localhost; on plain HTTP over LAN, use your keyboard's microphone instead
 

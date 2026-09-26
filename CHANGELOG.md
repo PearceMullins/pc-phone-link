@@ -6,6 +6,30 @@ All notable changes to PC Phone Link are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Physical mouse and keyboard passthrough** - Optional Settings toggle sends a Bluetooth mouse and keyboard paired to the phone straight to the PC: pointer movement, left/right/middle clicks, wheel scrolling, click-and-drag, double click, and scancode-level keystrokes with real Shift, Ctrl, Alt, and Win shortcuts
+- **Type without tapping** - While passthrough is on, physical keyboard keys reach the PC immediately with no focus tap; focus returns to the PC view after using phone buttons, and tapping a text field or the Keyboard composer keeps local typing
+- **Keyboard status line** - Settings shows whether the app is waiting for a key or receiving them, and Settings re-focuses the capture field when the page regains focus
+- **Cross-platform mobile input** - The same Settings toggle works on Android, iPadOS, and iOS browsers; the status line reports mouse and keyboard activity on any device
+- `/api/windows/{hwnd}/key-event` forwards one named key transition through `SendInput`, and held keys or mouse buttons release automatically on focus loss, panel change, or shutdown
+
+### Fixed
+
+- Browsers that send both mouse and simulated touch events for one physical click no longer double-fire: a touch event that matches a fresh mouse position is ignored
+- Devices without hover support still click accurately because the first press positions the PC pointer before clicking
+
+- **Mouse wheel direction** - iPads default to inverted wheel scrolling to match Apple natural scrolling, while Android and desktops keep the traditional direction; **Settings > Invert mouse wheel** overrides the choice per device
+- Physical key names fall back to key-code and key-name mapping when Safari reports `Unidentified`, so Bluetooth keyboards work on iPads that do not send `KeyboardEvent.code`
+- Dropped `inputmode="none"` from the hidden capture field, which blocked hardware key events in iPadOS 15 Safari
+
+### Fixed
+
+- Bluetooth mouse clicks use cursor-current actions so the PC pointer does not move at press or release, keeping double click and drag reliable
+- Mouse buttons release even when the pointer leaves the viewer, and the viewer accepts mouse input while Game controls are active
+
 ## [2.1.0] - 2026-07-18
 
 ### Changed

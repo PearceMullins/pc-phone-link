@@ -31,10 +31,12 @@ DWMWA_EXTENDED_FRAME_BOUNDS = 9
 DWMWA_CLOAKED = 14
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 INPUT_KEYBOARD = 1
+KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_SCANCODE = 0x0008
 KEYEVENTF_UNICODE = 0x0004
 MAPVK_VK_TO_VSC = 0
+MAPVK_VK_TO_VSC_EX = 4
 ULONG_PTR = getattr(wintypes, "ULONG_PTR", wintypes.WPARAM)
 LPCWSTR = getattr(wintypes, "LPCWSTR", ctypes.c_wchar_p)
 HWND_BROADCAST = 0xFFFF
@@ -207,6 +209,8 @@ _game_keys_by_session: dict[str, set[int]] = {}
 _game_key_owners: dict[int, set[str]] = {}
 _game_key_timers: dict[str, threading.Timer] = {}
 _game_session_sequence: dict[str, int] = {}
+_key_event_lock = threading.RLock()
+_held_key_events: set[str] = set()
 
 
 class KEYBDINPUT(ctypes.Structure):
@@ -335,6 +339,70 @@ SHORTCUT_KEYS: dict[str, int] = {
     "win": win32con.VK_LWIN,
     "x": 0x58,
 }
+KEY_EVENT_KEYS: dict[str, int] = {
+    **{f"Key{letter}": 0x41 + index for index, letter in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ")},
+    **{f"Digit{digit}": 0x30 + digit for digit in range(10)},
+    **{f"F{index}": win32con.VK_F1 + index - 1 for index in range(1, 25)},
+    **{f"Numpad{digit}": win32con.VK_NUMPAD0 + digit for digit in range(10)},
+    "AltLeft": win32con.VK_LMENU,
+    "AltRight": win32con.VK_RMENU,
+    "ArrowDown": win32con.VK_DOWN,
+    "ArrowLeft": win32con.VK_LEFT,
+    "ArrowRight": win32con.VK_RIGHT,
+    "ArrowUp": win32con.VK_UP,
+    "AudioVolumeDown": win32con.VK_VOLUME_DOWN,
+    "AudioVolumeMute": win32con.VK_VOLUME_MUTE,
+    "AudioVolumeUp": win32con.VK_VOLUME_UP,
+    "Backquote": 0xC0,
+    "Backslash": 0xDC,
+    "Backspace": win32con.VK_BACK,
+    "BracketLeft": 0xDB,
+    "BracketRight": 0xDD,
+    "BrowserBack": win32con.VK_BROWSER_BACK,
+    "BrowserForward": win32con.VK_BROWSER_FORWARD,
+    "BrowserHome": 0xAC,
+    "BrowserRefresh": 0xA8,
+    "CapsLock": win32con.VK_CAPITAL,
+    "Comma": 0xBC,
+    "ContextMenu": win32con.VK_APPS,
+    "ControlLeft": win32con.VK_LCONTROL,
+    "ControlRight": win32con.VK_RCONTROL,
+    "Delete": win32con.VK_DELETE,
+    "End": win32con.VK_END,
+    "Enter": win32con.VK_RETURN,
+    "Equal": 0xBB,
+    "Escape": win32con.VK_ESCAPE,
+    "Home": win32con.VK_HOME,
+    "Insert": win32con.VK_INSERT,
+    "IntlBackslash": 0xE2,
+    "IntlRo": 0xC1,
+    "MediaPlayPause": win32con.VK_MEDIA_PLAY_PAUSE,
+    "MediaStop": 0xB2,
+    "MediaTrackNext": win32con.VK_MEDIA_NEXT_TRACK,
+    "MediaTrackPrevious": win32con.VK_MEDIA_PREV_TRACK,
+    "MetaLeft": win32con.VK_LWIN,
+    "MetaRight": win32con.VK_RWIN,
+    "Minus": 0xBD,
+    "NumpadAdd": win32con.VK_ADD,
+    "NumpadDecimal": win32con.VK_DECIMAL,
+    "NumpadDivide": win32con.VK_DIVIDE,
+    "NumpadEnter": win32con.VK_RETURN,
+    "NumpadMultiply": win32con.VK_MULTIPLY,
+    "NumpadSubtract": win32con.VK_SUBTRACT,
+    "NumLock": win32con.VK_NUMLOCK,
+    "PageDown": win32con.VK_NEXT,
+    "PageUp": win32con.VK_PRIOR,
+    "Period": 0xBE,
+    "Quote": 0xDE,
+    "ScrollLock": win32con.VK_SCROLL,
+    "Semicolon": 0xBA,
+    "ShiftLeft": win32con.VK_LSHIFT,
+    "ShiftRight": win32con.VK_RSHIFT,
+    "Slash": 0xBF,
+    "Space": win32con.VK_SPACE,
+    "Tab": win32con.VK_TAB,
+}
+KEY_EVENT_EXTENDED_NAMES = frozenset({"NumpadEnter"})
 _GAME_SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
 PHONE_FIT_SNAPSHOTS: dict[int, PhoneFitSnapshot] = {}
@@ -909,6 +977,41 @@ def press_special_key(hwnd: int, key_name: str) -> None:
     )
 
 
+def send_key_event(hwnd: int, key_name: str, down: bool = True) -> bool:
+    """Forward one physical keyboard transition named by KeyboardEvent.code."""
+    name = str(key_name).strip()
+    if name not in KEY_EVENT_KEYS:
+        return False
+
+    if not _is_fullscreen_target(hwnd):
+        focus_window(hwnd)
+    pressed = bool(down)
+    _emit_named_key_event(name, down=pressed)
+    with _key_event_lock:
+        if pressed:
+            _held_key_events.add(name)
+        else:
+            _held_key_events.discard(name)
+    return True
+
+
+def release_all_key_events(*, reason: str = "lifecycle") -> int:
+    """Release every keyboard key still held by physical keyboard passthrough."""
+    with _key_event_lock:
+        held = sorted(_held_key_events)
+        _held_key_events.clear()
+    released = 0
+    for name in held:
+        try:
+            _emit_named_key_event(name, down=False)
+            released += 1
+        except (OSError, RuntimeError, pywintypes.error):
+            continue
+    if released:
+        log_event("windows-host", "key-events-released", {"reason": reason, "key_count": released})
+    return released
+
+
 def press_key_chord(key_names: list[str]) -> None:
     """Press a combination of named keys such as Win+D for quick actions."""
     keys: list[int] = []
@@ -1057,6 +1160,34 @@ def _emit_game_key(virtual_key: int, *, down: bool) -> None:
                 ki=KEYBDINPUT(
                     wVk=0,
                     wScan=scan_code,
+                    dwFlags=flags,
+                    time=0,
+                    dwExtraInfo=0,
+                ),
+            )
+        ]
+    )
+
+
+def _emit_named_key_event(name: str, *, down: bool) -> None:
+    _emit_key_event(KEY_EVENT_KEYS[name], down=down, extended=name in KEY_EVENT_EXTENDED_NAMES)
+
+
+def _emit_key_event(virtual_key: int, *, down: bool, extended: bool = False) -> None:
+    mapped = int(win32api.MapVirtualKey(virtual_key, MAPVK_VK_TO_VSC_EX))
+    if not mapped:
+        raise RuntimeError("Windows could not map the key to a hardware scan code.")
+    is_extended = extended or (mapped & 0xFF00) == 0xE000
+    flags = KEYEVENTF_SCANCODE | (KEYEVENTF_EXTENDEDKEY if is_extended else 0)
+    if not down:
+        flags |= KEYEVENTF_KEYUP
+    _send_inputs(
+        [
+            INPUT(
+                type=INPUT_KEYBOARD,
+                ki=KEYBDINPUT(
+                    wVk=0,
+                    wScan=mapped & 0xFF,
                     dwFlags=flags,
                     time=0,
                     dwExtraInfo=0,

@@ -67,7 +67,9 @@ from .windows_host import (
     maximize_window,
     press_special_key,
     release_all_game_keys,
+    release_all_key_events,
     restore_window,
+    send_key_event,
     send_text,
     window_to_dict,
 )
@@ -106,6 +108,11 @@ class TextRequest(BaseModel):
 
 class SpecialKeyRequest(BaseModel):
     key: str
+
+
+class KeyEventRequest(BaseModel):
+    key: str = Field(min_length=1, max_length=32)
+    down: bool = True
 
 
 class GameKeyRequest(BaseModel):
@@ -200,6 +207,7 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
     @app.on_event("shutdown")
     async def log_shutdown_event() -> None:
         release_all_game_keys(reason="shutdown")
+        release_all_key_events(reason="shutdown")
         log_event("host", "app-stopped", {})
 
     @app.middleware("http")
@@ -697,6 +705,12 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
         _handle_window_action(lambda: press_special_key(hwnd, payload.key))
         log_event("host", "special-key-finished", {"hwnd": hwnd, "key": payload.key})
         return {"ok": True}
+
+    @app.post("/api/windows/{hwnd}/key-event")
+    async def key_event(hwnd: int, payload: KeyEventRequest, request: Request) -> dict[str, bool]:
+        _require_token(app, request)
+        applied = _handle_window_action(lambda: send_key_event(hwnd, payload.key, payload.down))
+        return {"ok": True, "applied": bool(applied)}
 
     @app.post("/api/windows/{hwnd}/game-key")
     async def game_key(hwnd: int, payload: GameKeyRequest, request: Request) -> dict[str, bool]:

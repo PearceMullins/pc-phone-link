@@ -102,6 +102,18 @@ const state = {
   messageHistoryExpanded: false,
   followTyping: false,
   followMouse: false,
+  nativeInputEnabled: false,
+  nativeHeldKeys: new Set(),
+  nativeKeySequence: 0,
+  nativeKeyCount: 0,
+  nativeMouseCount: 0,
+  lastMousePointerAt: 0,
+  lastMousePointerPoint: null,
+  invertWheel: false,
+  nativeMousePointerId: null,
+  nativeMouseLeftDown: false,
+  nativeMousePoint: null,
+  nativeSyncedPoint: null,
   activePointers: new Map(),
   twoFingerGesture: null,
   pendingTap: null,
@@ -161,6 +173,8 @@ const GAME_LAYOUT_STORAGE_KEY = "pc-phone-link-game-layout-v1";
 const POINTER_SHORTCUT_STORAGE_KEY = "pc-phone-link-pointer-shortcut";
 const BOTTOM_NAV_STORAGE_KEY = "pc-phone-link-bottom-nav";
 const GESTURE_DIAGNOSTICS_STORAGE_KEY = "pc-phone-link-gesture-diagnostics";
+const NATIVE_INPUT_STORAGE_KEY = "pc-phone-link-native-input";
+const INVERT_WHEEL_STORAGE_KEY = "pc-phone-link-invert-wheel";
 const MAX_GESTURE_LOG_BUFFER = 240;
 const RECENT_WINDOWS_STORAGE_KEY = "pc-phone-link-recent-windows";
 const STREAM_FPS_STORAGE_KEY = "pc-phone-link-stream-fps";
@@ -323,6 +337,10 @@ const elements = {
   messageHistorySection: document.getElementById("messageHistorySection"),
   mouseSpeed: document.getElementById("mouseSpeed"),
   mouseSpeedValue: document.getElementById("mouseSpeedValue"),
+  nativeInput: document.getElementById("nativeInput"),
+  nativeInputCapture: document.getElementById("nativeInputCapture"),
+  nativeInputStatus: document.getElementById("nativeInputStatus"),
+  invertWheel: document.getElementById("invertWheel"),
   powerMenu: document.getElementById("powerMenu"),
   powerToggle: document.getElementById("powerToggle"),
   settingsPowerMenu: document.getElementById("settingsPowerMenu"),
@@ -1588,6 +1606,9 @@ function loadViewerPreferences() {
     state.gameLayout = window.PCPhoneLinkGameControls.defaultGameLayout();
   }
   state.gestureDiagnosticsEnabled = window.localStorage.getItem(GESTURE_DIAGNOSTICS_STORAGE_KEY) !== "false";
+  state.nativeInputEnabled = window.localStorage.getItem(NATIVE_INPUT_STORAGE_KEY) === "true";
+  const savedInvertWheel = window.localStorage.getItem(INVERT_WHEEL_STORAGE_KEY);
+  state.invertWheel = savedInvertWheel === null ? applePointerDevice() : savedInvertWheel === "true";
   state.gestureSessionId = diagnosticId("session");
   const savedStreamFps = Number.parseInt(window.localStorage.getItem(STREAM_FPS_STORAGE_KEY) || "", 10);
   if (Number.isFinite(savedStreamFps)) {
@@ -1602,6 +1623,9 @@ function loadViewerPreferences() {
   }
 
   if (elements.gestureDiagnostics) elements.gestureDiagnostics.checked = state.gestureDiagnosticsEnabled;
+  if (elements.nativeInput) elements.nativeInput.checked = state.nativeInputEnabled;
+  if (elements.invertWheel) elements.invertWheel.checked = state.invertWheel;
+  syncNativeInputUi();
   if (elements.mouseSpeed) elements.mouseSpeed.value = String(state.mouseSpeed);
   if (elements.followMouse) elements.followMouse.checked = state.followMouse;
   updateMouseSpeedLabel();
@@ -2442,7 +2466,11 @@ function updateSelectedWindow(windowInfo) {
   if (!state.selectedWindow || state.selectedWindow.hwnd !== windowInfo.hwnd) {
     releaseAllGameKeys("target-change");
     cancelPendingTap("selected-window-change");
+    releaseNativeKeys("target-change");
+    releaseNativeMouseButton("target-change");
     state.typingAnchor = null;
+    state.nativeSyncedPoint = null;
+    syncNativeInputStatus();
   }
   state.selectedWindow = windowInfo;
   state.phoneFitEnabled = Boolean(windowInfo.is_phone_fit);
@@ -4379,11 +4407,251 @@ function pointerEventDetails(event, extras = {}) {
   };
 }
 
+function syncNativeInputUi() {
+  elements.viewerShell.classList.toggle("native-input-active", state.nativeInputEnabled);
+  syncNativeInputStatus();
+}
+
+function syncNativeInputStatus() {
+  if (!elements.nativeInputStatus) return;
+  if (!state.nativeInputEnabled) {
+    elements.nativeInputStatus.textContent = "Mouse and keyboard passthrough is off.";
+    return;
+  }
+  if (!state.selectedWindow) {
+    elements.nativeInputStatus.textContent = "Choose a PC window to start using the mouse and keyboard.";
+    return;
+  }
+  const mouse = state.nativeMouseCount
+    ? `Mouse: active (${state.nativeMouseCount} events).`
+    : "Mouse: waiting for movement.";
+  const keyboard = state.nativeKeyCount
+    ? `Keyboard: receiving keys (${state.nativeKeyCount} so far).`
+    : "Keyboard: waiting for a key.";
+  elements.nativeInputStatus.textContent = `${mouse} ${keyboard}`;
+}
+
+function recordNativeMouseEvent(event) {
+  state.nativeMouseCount += 1;
+  state.lastMousePointerAt = performance.now();
+  state.lastMousePointerPoint = { x: event.clientX, y: event.clientY };
+  if (state.nativeMouseCount === 1) syncNativeInputStatus();
+}
+
+function nativeTouchEcho(event) {
+  if (event.pointerType === "mouse") return false;
+  if (!state.nativeInputEnabled || !state.lastMousePointerAt) return false;
+  if (performance.now() - state.lastMousePointerAt > 80) return false;
+  const point = state.lastMousePointerPoint;
+  if (!point) return false;
+  return Math.abs(point.x - event.clientX) <= 2 && Math.abs(point.y - event.clientY) <= 2;
+}
+
+function nativeKeyName(event) {
+  const helpers = window.PCPhoneLinkKeyboardKeys;
+  if (helpers?.nameForEvent) return helpers.nameForEvent(event);
+  const code = typeof event.code === "string" ? event.code.trim() : "";
+  return code === "Unidentified" ? "" : code;
+}
+
+function setNativeInputEnabled(enabled) {
+  const next = Boolean(enabled);
+  if (next === state.nativeInputEnabled) return;
+  state.nativeInputEnabled = next;
+  window.localStorage.setItem(NATIVE_INPUT_STORAGE_KEY, String(next));
+  if (elements.nativeInput) elements.nativeInput.checked = next;
+  syncNativeInputUi();
+  if (!next) {
+    releaseNativeKeys("disabled");
+    releaseNativeMouseButton("disabled");
+    elements.nativeInputCapture?.blur();
+    return;
+  }
+  focusNativeInputCapture({ force: true });
+  showToast("Physical mouse and keyboard now pass through to the PC.");
+}
+
+function focusNativeInputCapture({ force = false } = {}) {
+  if (!state.nativeInputEnabled || !elements.nativeInputCapture || !state.selectedWindow) return;
+  if (document.activeElement === elements.nativeInputCapture) return;
+  if (!force && nativeEditableElement(document.activeElement)) return;
+  try {
+    elements.nativeInputCapture.focus({ preventScroll: true });
+  } catch {
+    elements.nativeInputCapture.focus();
+  }
+}
+
+function nativeLocalDialogOpen() {
+  return Boolean(document.querySelector("dialog[open]"));
+}
+
+function nativeEditableElement(element) {
+  if (!element || element === document.body || element === document.documentElement) return false;
+  if (element === elements.nativeInputCapture) return false;
+  if (typeof element.closest !== "function") return false;
+  return Boolean(element.closest("input, textarea, select, [contenteditable='true']"));
+}
+
+function nativeKeyCaptureActive() {
+  if (!state.nativeInputEnabled || !state.selectedWindow || nativeLocalDialogOpen()) return false;
+  return !nativeEditableElement(document.activeElement);
+}
+
+function handleNativeKeyEvent(event, down) {
+  if (!nativeKeyCaptureActive() || event.isComposing) return;
+  const key = nativeKeyName(event);
+  if (!key) return;
+  event.preventDefault();
+  if (down) {
+    state.nativeHeldKeys.add(key);
+    if (!event.repeat) {
+      state.nativeKeyCount += 1;
+      syncNativeInputStatus();
+    }
+  } else {
+    state.nativeHeldKeys.delete(key);
+  }
+  sendNativeKeyEvent(key, down);
+}
+
+function sendNativeKeyEvent(key, down) {
+  if (!state.selectedWindow) return;
+  state.nativeKeySequence += 1;
+  queueJsonPost(`/api/windows/${state.selectedWindow.hwnd}/key-event`, {
+    key,
+    down,
+    sequence: state.nativeKeySequence,
+  }).catch(() => null);
+}
+
+function releaseNativeKeys(reason) {
+  if (!state.nativeHeldKeys.size) return;
+  const held = Array.from(state.nativeHeldKeys);
+  state.nativeHeldKeys.clear();
+  held.forEach((key) => sendNativeKeyEvent(key, false));
+  logGestureDiagnostic("native-key-release", { reason, state: "released" });
+}
+
+function releaseNativeMouseButton(reason) {
+  if (!state.nativeMouseLeftDown) {
+    state.nativeMousePointerId = null;
+    return;
+  }
+  state.nativeMouseLeftDown = false;
+  state.nativeMousePointerId = null;
+  if (!state.selectedWindow) return;
+  sendPointer("up_current");
+  logGestureDiagnostic("native-mouse-release", { reason, state: "released" });
+}
+
+function nativePointSynced(point) {
+  const synced = state.nativeSyncedPoint;
+  return Boolean(synced)
+    && Math.abs(synced.x - point.x) < 0.0005
+    && Math.abs(synced.y - point.y) < 0.0005;
+}
+
+function sendNativeButtonAction(currentAction, moveAction, point) {
+  if (nativePointSynced(point)) {
+    sendPointer(currentAction);
+    return;
+  }
+  state.nativeSyncedPoint = { ...point };
+  sendPointer(moveAction, point);
+}
+
+function handleNativeMouseDown(event) {
+  if (!state.selectedWindow) return;
+  event.preventDefault();
+  recordNativeMouseEvent(event);
+  focusNativeInputCapture({ force: true });
+  const point = viewerPointToSourceNormalized(event.clientX, event.clientY);
+  if (!point) return;
+  state.nativeMousePoint = point;
+  state.nativeMousePointerId = event.pointerId;
+  if (event.button === 0) {
+    state.nativeMouseLeftDown = true;
+    setPointerCaptureSafely(event);
+    sendNativeButtonAction("down_current", "down", point);
+    return;
+  }
+  if (event.button === 1) {
+    sendNativeButtonAction("middle_click_current", "middle_tap", point);
+    return;
+  }
+  if (event.button === 2) {
+    sendNativeButtonAction("right_click_current", "right_tap", point);
+  }
+}
+
+function handleNativeMouseMove(event) {
+  if (!state.selectedWindow) return;
+  const point = viewerPointToSourceNormalized(event.clientX, event.clientY);
+  if (!point) return;
+  event.preventDefault();
+  recordNativeMouseEvent(event);
+  state.nativeMousePoint = point;
+  state.nativeSyncedPoint = { ...point };
+  sendPointer("move", point);
+}
+
+function handleNativeMouseUp(event) {
+  if (!state.selectedWindow || event.button !== 0 || !state.nativeMouseLeftDown) return;
+  event.preventDefault();
+  recordNativeMouseEvent(event);
+  state.nativeMouseLeftDown = false;
+  state.nativeMousePointerId = null;
+  releasePointerCaptureSafely(event.pointerId, "native-up");
+  sendPointer("up_current");
+}
+
+function applePointerDevice() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function nativeWheelDelta(event) {
+  const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? 400 : 1;
+  const pixels = Number.isFinite(event.deltaY) ? event.deltaY * unit : 0;
+  const direction = state.invertWheel ? 1 : -1;
+  return Math.round(direction * Math.max(-1200, Math.min(1200, pixels)));
+}
+
+function setInvertWheel(value) {
+  state.invertWheel = Boolean(value);
+  window.localStorage.setItem(INVERT_WHEEL_STORAGE_KEY, String(state.invertWheel));
+  if (elements.invertWheel) elements.invertWheel.checked = state.invertWheel;
+}
+
+function handleNativeWheel(event) {
+  if (!state.nativeInputEnabled || !state.selectedWindow) return;
+  event.preventDefault();
+  recordNativeMouseEvent(event);
+  const delta = nativeWheelDelta(event);
+  if (!delta) return;
+  const point = viewerPointToSourceNormalized(event.clientX, event.clientY);
+  if (point && !nativePointSynced(point)) {
+    state.nativeMousePoint = point;
+    state.nativeSyncedPoint = { ...point };
+    sendPointer("move", point);
+  }
+  sendPointer("wheel_current", { delta });
+}
+
 function handlePointerDown(event) {
+  if (state.nativeInputEnabled && event.pointerType === "mouse") {
+    handleNativeMouseDown(event);
+    return;
+  }
+  if (state.nativeInputEnabled && nativeTouchEcho(event)) {
+    return;
+  }
   if (state.controlMode === "game") {
     event.preventDefault();
     return;
   }
+  if (state.nativeInputEnabled) focusNativeInputCapture({ force: true });
   if (state.activePointers.size === 0) state.currentGestureId = diagnosticId("gesture");
   const arms = window.PCPhoneLinkGestureArms;
   const forcedDragArm = arms.isOneFingerDragArm(state.gestureArm);
@@ -4493,6 +4761,10 @@ function handlePointerDown(event) {
 }
 
 function handlePointerMove(event) {
+  if (state.nativeInputEnabled && event.pointerType === "mouse") {
+    handleNativeMouseMove(event);
+    return;
+  }
   if (state.activePointers.has(event.pointerId)) {
     state.activePointers.set(event.pointerId, {
       x: event.clientX,
@@ -4709,6 +4981,11 @@ function handlePointerMove(event) {
 function handlePointerUp(event) {
   logGestureDiagnostic("pointer-up", pointerEventDetails(event, { phase: "up", state: "finishing" }));
 
+  if (state.nativeInputEnabled && event.pointerType === "mouse") {
+    handleNativeMouseUp(event);
+    return;
+  }
+
   if (state.twoFingerGesture && state.twoFingerGesture.pointerIds.includes(event.pointerId)) {
     event.preventDefault();
     const gesture = state.twoFingerGesture;
@@ -4832,6 +5109,11 @@ function handlePointerCancel(event) {
     reason: "browser",
     state: "reset",
   }), { immediate: true });
+  if (state.nativeInputEnabled && event.pointerType === "mouse") {
+    releasePointerCaptureSafely(event.pointerId, "cancel");
+    releaseNativeMouseButton("pointer-cancel");
+    return;
+  }
   if (state.twoFingerGesture && state.twoFingerGesture.pointerIds.includes(event.pointerId)) {
     state.activePointers.delete(event.pointerId);
     for (const pointerId of state.twoFingerGesture.pointerIds) {
@@ -5810,6 +6092,12 @@ function openDestination(destination, { toggle = false } = {}) {
   elements.controlsPanel?.classList.remove("panel-open");
   elements.settingsPanel?.classList.remove("panel-open");
   if (next !== "keyboard" && !elements.keyboardPanel.classList.contains("hidden")) closeKeyboardCapture();
+  if (next === "viewer") {
+    focusNativeInputCapture({ force: true });
+  } else {
+    releaseNativeKeys("destination-change");
+    releaseNativeMouseButton("destination-change");
+  }
 
   if (next === "windows") {
     elements.windowDrawer.classList.add("open", "panel-open");
@@ -6044,6 +6332,37 @@ elements.toggleKeyboard.addEventListener("click", () => {
 });
 elements.toggleMessageHistory.addEventListener("pointerdown", () => holdKeyboardCapture());
 elements.toggleMessageHistory.addEventListener("click", toggleMessageHistoryPanel);
+if (elements.nativeInput) {
+  elements.nativeInput.addEventListener("change", (event) => setNativeInputEnabled(event.target.checked));
+}
+if (elements.invertWheel) {
+  elements.invertWheel.addEventListener("change", (event) => setInvertWheel(event.target.checked));
+}
+if (elements.nativeInputCapture) {
+  elements.nativeInputCapture.addEventListener("blur", () => {
+    if (state.nativeInputEnabled && state.nativeHeldKeys.size) releaseNativeKeys("capture-blur");
+  });
+}
+document.addEventListener("keydown", (event) => handleNativeKeyEvent(event, true), { capture: true });
+document.addEventListener("keyup", (event) => handleNativeKeyEvent(event, false), { capture: true });
+document.addEventListener("focusin", (event) => {
+  if (!state.nativeInputEnabled || !state.selectedWindow || nativeLocalDialogOpen()) return;
+  if (nativeEditableElement(event.target)) return;
+  focusNativeInputCapture({ force: true });
+});
+window.addEventListener("focus", () => {
+  if (!state.nativeInputEnabled || !state.selectedWindow || nativeLocalDialogOpen()) return;
+  if (nativeEditableElement(document.activeElement)) return;
+  focusNativeInputCapture({ force: true });
+});
+window.addEventListener("pointerup", (event) => {
+  if (state.nativeInputEnabled && event.pointerType === "mouse") handleNativeMouseUp(event);
+}, { passive: false });
+window.addEventListener("pointercancel", (event) => {
+  if (!state.nativeInputEnabled || event.pointerType !== "mouse") return;
+  releasePointerCaptureSafely(event.pointerId, "native-cancel");
+  releaseNativeMouseButton("pointer-cancel");
+}, { passive: false });
 elements.clearTextInput.addEventListener("click", () => clearComposerDraft());
 elements.fitToggle.addEventListener("click", () => handleFitToggle().catch((error) => showToast(error.message)));
 if (elements.voiceInput) {
@@ -6090,6 +6409,7 @@ elements.touchLayer.addEventListener("pointermove", handlePointerMove, { passive
 elements.touchLayer.addEventListener("pointerup", handlePointerUp, { passive: false });
 elements.touchLayer.addEventListener("pointercancel", handlePointerCancel, { passive: false });
 elements.touchLayer.addEventListener("contextmenu", (event) => event.preventDefault());
+elements.touchLayer.addEventListener("wheel", handleNativeWheel, { passive: false });
 elements.gameControls?.addEventListener("pointerdown", beginGameLayoutDrag, { capture: true, passive: false });
 elements.gameControls?.addEventListener("pointermove", moveGameLayoutDrag, { capture: true, passive: false });
 elements.gameControls?.addEventListener("pointerup", finishGameLayoutDrag, { capture: true, passive: false });
@@ -6247,11 +6567,15 @@ function emergencyTouchCancel(reason) {
 }
 window.addEventListener("blur", () => {
   releaseAllGameKeys("window-blur", { keepalive: true });
+  releaseNativeKeys("window-blur");
+  releaseNativeMouseButton("window-blur");
   releaseActiveTouches();
 });
 window.addEventListener("pagehide", () => {
   emergencyTouchCancel("pagehide");
   releaseAllGameKeys("pagehide", { keepalive: true });
+  releaseNativeKeys("pagehide");
+  releaseNativeMouseButton("pagehide");
   releaseActiveTouches();
   logGestureDiagnostic("lifecycle-release", { reason: "pagehide", state: "reset" }, { immediate: true, force: true });
   flushGestureDiagnostics({ keepalive: true });
@@ -6276,6 +6600,8 @@ window.addEventListener("online", () => {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") {
     releaseAllGameKeys("visibility-hidden", { keepalive: true });
+    releaseNativeKeys("visibility-hidden");
+    releaseNativeMouseButton("visibility-hidden");
     releaseActiveTouches();
     return;
   }

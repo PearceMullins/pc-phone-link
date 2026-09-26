@@ -53,6 +53,27 @@ Viewer focus and zoom stay fixed across frames, reconnects, window-list refreshe
 - Special keys (Enter, Backspace, arrows, etc.) are available in the UI
 - **Voice input** requires HTTPS or localhost in the phone browser; on plain HTTP, use the keyboard microphone instead
 
+## Physical mouse and keyboard
+
+Pair a Bluetooth mouse and keyboard with your phone, then turn on **Settings > Physical mouse & keyboard**. The PC view then behaves like a native display:
+
+- Mouse movement moves the PC pointer immediately; left click, right click, middle click, and the scroll wheel all reach the PC
+- Left click, double click, and click-and-drag work like a real mouse; the cursor does not drift between the two clicks of a double click
+- Held left button drags on the PC, so you can select text, move windows, and drag files; releasing outside the viewer still drops the drag
+- Scroll wheel reaches the PC under the PC pointer, including a second scroll without moving the cursor first; **Invert mouse wheel** in the same settings section flips the direction, and iPads start with it on to match Apple's natural scrolling default
+- **Just start typing** — no need to open the Keyboard panel or tap the viewer. Keys pass through as real Windows keystrokes, including Shift, Ctrl, Alt, Win, function keys, arrows, and the numpad, so shortcuts such as Ctrl+C, Alt+Tab, and Win+D work
+- Keys always go to the PC unless you tap into a text field. Tapping the Keyboard panel still opens the composer: tap the message box to type locally (voice and Send), or keep typing to send keystrokes straight to the PC
+- Key repeat and held keys match the physical keyboard; keys and mouse buttons release automatically when the page loses focus, you switch panels, or you turn the setting off
+- **Settings > Physical mouse & keyboard shows a live status line** — it waits for a key, then confirms keys are arriving, so you can tell the keyboard reached the app before you start typing into the PC
+- Keys keep working on iPads that only report generic key codes: the app falls back to key-code and key-name mapping when Safari sends `Unidentified`
+- Touch controls keep working while the setting is on, and the hidden capture field does not open the phone's on-screen keyboard
+
+Limits: Windows secure attention (Ctrl+Alt+Del) cannot be sent from a browser, and the phone OS may keep a few system-level combinations for itself. Everything is sent over your local network, so pointer and key latency tracks your Wi‑Fi quality.
+
+iPad and iPhone notes: pair the mouse and keyboard in iPadOS **Settings > Bluetooth**, then use the page in Safari. iPadOS only sends hardware key events while an editable field holds focus, so the app keeps a hidden read-only capture field focused for you; tapping a text box still types locally. iPadOS may not deliver middle-click from some mice, and Apple's system shortcuts (Cmd+Tab, Cmd+H, Cmd+Q) stay with iPadOS.
+
+Any phone or tablet works: Android (Chrome, Samsung Internet, Firefox), iPadOS and iOS Safari, and desktop browsers all use the same setting. The app waits for movement or a key instead of assuming a platform, and the status line in Settings reports what it sees. Devices or browsers that do not report hover still work: the first click moves the PC pointer into place before it clicks, so click, drag, double click, and the wheel all land on the right spot. The wheel direction follows the platform's natural direction by default, and **Invert mouse wheel** flips it for any device.
+
 ## Streaming quality
 
 - Adjust **FPS** and **resolution** from the stream settings panel

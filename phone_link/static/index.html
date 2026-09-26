@@ -10,7 +10,7 @@
   <title>PC Phone Link</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="/assets/styles.css?v=20260921g">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260921h">
 </head>
 <body>
   <div id="app">
@@ -117,6 +117,7 @@
       <img id="remoteView" alt="Selected window stream" draggable="false">
       <div id="touchLayer" class="touch-layer"></div>
       <input id="nativeInputCapture" class="native-input-capture" type="text" readonly autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Physical keyboard capture" tabindex="-1">
+      <div id="secureDesktopNotice" class="secure-desktop-notice hidden" role="alert"><strong>Windows is asking for permission on the PC</strong><span>This prompt sits on Windows&rsquo; protected screen, so it cannot be shown or clicked from here. Approve it on the PC, or press Esc there to cancel.</span></div>
       <section id="gameControls" class="game-controls hidden" aria-label="Game controls">
         <div class="game-layout-toolbar" role="toolbar" aria-label="Game layout editor"><strong>Edit Game layout</strong><span>Drag outlined groups or use focused handle arrow keys.</span><button id="doneGameLayout" class="primary-button" type="button">Done</button><button id="resetGameLayoutOverlay" class="ghost-button" type="button">Reset layout</button></div>
         <div class="game-layout-group game-movement-control" data-game-layout-group="movement" aria-label="Movement control position">
@@ -154,7 +155,7 @@
   <script src="/assets/gestures.js?v=20260718a" defer></script>
   <script src="/assets/gesture-arms.js?v=20260818e" defer></script>
   <script src="/assets/game-controls.js?v=20260819f" defer></script>
-  <script src="/assets/keyboard-keys.js?v=20260921g" defer></script>
-  <script src="/assets/app.js?v=20260921g" defer></script>
+  <script src="/assets/keyboard-keys.js?v=20260921h" defer></script>
+  <script src="/assets/app.js?v=20260921h" defer></script>
 </body>
 </html>

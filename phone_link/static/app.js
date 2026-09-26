@@ -109,6 +109,9 @@ const state = {
   nativeMouseCount: 0,
   lastMousePointerAt: 0,
   lastMousePointerPoint: null,
+  secureDesktopActive: false,
+  secureDesktopTimer: null,
+  secureDesktopPollInFlight: false,
   invertWheel: false,
   nativeMousePointerId: null,
   nativeMouseLeftDown: false,
@@ -341,6 +344,7 @@ const elements = {
   nativeInputCapture: document.getElementById("nativeInputCapture"),
   nativeInputStatus: document.getElementById("nativeInputStatus"),
   invertWheel: document.getElementById("invertWheel"),
+  secureDesktopNotice: document.getElementById("secureDesktopNotice"),
   powerMenu: document.getElementById("powerMenu"),
   powerToggle: document.getElementById("powerToggle"),
   settingsPowerMenu: document.getElementById("settingsPowerMenu"),
@@ -2471,6 +2475,7 @@ function updateSelectedWindow(windowInfo) {
     state.typingAnchor = null;
     state.nativeSyncedPoint = null;
     syncNativeInputStatus();
+    syncSecureDesktopPolling();
   }
   state.selectedWindow = windowInfo;
   state.phoneFitEnabled = Boolean(windowInfo.is_phone_fit);
@@ -4639,6 +4644,45 @@ function handleNativeWheel(event) {
   sendPointer("wheel_current", { delta });
 }
 
+function secureDesktopPollingWanted() {
+  return Boolean(state.token)
+    && Boolean(state.selectedWindow)
+    && state.currentDestination === "viewer"
+    && !document.hidden;
+}
+
+function setSecureDesktopNotice(active) {
+  const next = Boolean(active);
+  if (next === state.secureDesktopActive) return;
+  state.secureDesktopActive = next;
+  elements.secureDesktopNotice?.classList.toggle("hidden", !next);
+}
+
+async function pollSecureDesktop() {
+  if (state.secureDesktopPollInFlight || !secureDesktopPollingWanted()) return;
+  state.secureDesktopPollInFlight = true;
+  try {
+    const response = await apiFetch("/api/secure-desktop");
+    setSecureDesktopNotice(Boolean(response?.active));
+  } catch {
+    setSecureDesktopNotice(false);
+  } finally {
+    state.secureDesktopPollInFlight = false;
+  }
+}
+
+function syncSecureDesktopPolling() {
+  if (!secureDesktopPollingWanted()) {
+    window.clearInterval(state.secureDesktopTimer);
+    state.secureDesktopTimer = null;
+    setSecureDesktopNotice(false);
+    return;
+  }
+  if (state.secureDesktopTimer) return;
+  state.secureDesktopTimer = window.setInterval(pollSecureDesktop, 1500);
+  pollSecureDesktop();
+}
+
 function handlePointerDown(event) {
   if (state.nativeInputEnabled && event.pointerType === "mouse") {
     handleNativeMouseDown(event);
@@ -6127,6 +6171,7 @@ function openDestination(destination, { toggle = false } = {}) {
   });
   syncGameControlsUi();
   renderBottomNav();
+  syncSecureDesktopPolling();
   if (history.replaceState) history.replaceState(null, "", `#${next}`);
 }
 
@@ -6603,8 +6648,10 @@ document.addEventListener("visibilitychange", () => {
     releaseNativeKeys("visibility-hidden");
     releaseNativeMouseButton("visibility-hidden");
     releaseActiveTouches();
+    syncSecureDesktopPolling();
     return;
   }
+  syncSecureDesktopPolling();
   if (document.visibilityState === "visible" && state.token && !state.hostReconnectTimer) {
     bootstrap({ quiet: true });
   }

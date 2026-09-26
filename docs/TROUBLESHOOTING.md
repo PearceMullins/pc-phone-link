@@ -54,6 +54,18 @@ Common problems and fixes for PC Phone Link.
 3. Lower FPS and resolution in stream settings
 4. Check logs for capture permission or `blocked` diagnostics
 
+## Screen goes black while installing something or when Windows asks for permission
+
+A User Account Control prompt (the "Do you want to allow this app to make changes?" dialog) runs on Windows' **secure desktop**. Windows blocks every normal app from capturing or clicking that desktop, so the phone shows a black screen and nothing you send can reach the prompt. This is a Windows security boundary, not an app bug — remote desktop tools only avoid it because Windows itself redirects the secure desktop inside an RDP session.
+
+The phone now shows a notice when this happens instead of leaving you guessing.
+
+**Fixes:**
+
+1. Approve or cancel the prompt on the PC itself, then the stream resumes by itself
+2. To avoid prompts when installing from the phone, prefer installers that do not need administrator rights (per-user or portable apps)
+3. Do not disable UAC or the secure desktop just to make remote clicking work — that removes a core Windows protection
+
 ## Console does not show every request
 
 The host console is quiet by default: it prints the access URLs and connect code, then stays silent so per-request logging cannot slow down pointer input. Every request is still written to `%LOCALAPPDATA%\PC Phone Link\logs\host-events.jsonl`.

@@ -154,6 +154,58 @@ def test_key_event_route_requires_paired_token() -> None:
     assert response.status_code == 401
 
 
+def test_secure_desktop_active_detects_secure_desktop() -> None:
+    def fake_info(handle: object, index: int, buffer: object, size: int, needed: object) -> bool:
+        buffer.value = "Winlogon"
+        return True
+
+    with (
+        mock.patch.object(windows_host, "open_input_desktop", return_value=7),
+        mock.patch.object(windows_host, "close_desktop") as close_desktop,
+        mock.patch.object(windows_host, "get_user_object_information", side_effect=fake_info),
+    ):
+        assert windows_host.secure_desktop_active() is True
+
+    close_desktop.assert_called_once_with(7)
+
+
+def test_secure_desktop_active_detects_default_desktop() -> None:
+    def fake_info(handle: object, index: int, buffer: object, size: int, needed: object) -> bool:
+        buffer.value = "Default"
+        return True
+
+    with (
+        mock.patch.object(windows_host, "open_input_desktop", return_value=9),
+        mock.patch.object(windows_host, "close_desktop"),
+        mock.patch.object(windows_host, "get_user_object_information", side_effect=fake_info),
+    ):
+        assert windows_host.secure_desktop_active() is False
+
+
+def test_secure_desktop_active_treats_locked_input_desktop_as_protected() -> None:
+    with (
+        mock.patch.object(windows_host, "open_input_desktop", return_value=0),
+        mock.patch.object(windows_host, "close_desktop") as close_desktop,
+    ):
+        assert windows_host.secure_desktop_active() is True
+
+    close_desktop.assert_not_called()
+
+
+def test_secure_desktop_route_reports_host_state() -> None:
+    application = app_module.create_app(connect_code="1234")
+    application.state.paired_browsers = [{"token": "test-token"}]
+    with (
+        mock.patch.object(app_module, "touch_paired_browser", return_value=True),
+        mock.patch.object(app_module, "secure_desktop_active", return_value=True),
+        TestClient(application) as client,
+    ):
+        response = client.get("/api/secure-desktop", headers={"X-Access-Token": "test-token"})
+
+    assert response.status_code == 200
+    assert response.json() == {"active": True}
+
+
 def test_physical_input_passthrough_assets_are_wired() -> None:
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     script = (STATIC / "app.js").read_text(encoding="utf-8")
@@ -167,6 +219,7 @@ def test_physical_input_passthrough_assets_are_wired() -> None:
     assert 'id="nativeInputCapture" class="native-input-capture" type="text" readonly' in html
     assert 'inputmode="none"' not in html
     assert 'id="remoteView" alt="Selected window stream" draggable="false"' in html
+    assert 'id="secureDesktopNotice"' in html
     assert 'src="/assets/keyboard-keys.js?' in html
     assert (STATIC / "keyboard-keys.js").is_file()
     assert "NATIVE_INPUT_STORAGE_KEY" in script
@@ -179,6 +232,9 @@ def test_physical_input_passthrough_assets_are_wired() -> None:
     assert "nativeTouchEcho" in script
     assert "INVERT_WHEEL_STORAGE_KEY" in script
     assert "applePointerDevice" in script
+    assert '"/api/secure-desktop"' in script
+    assert "secureDesktopNotice" in script
+    assert "syncSecureDesktopPolling" in script
     assert 'event.pointerType === "mouse"' in script
     assert "handleNativeMouseMove" in script
     assert "nativeSyncedPoint" in script

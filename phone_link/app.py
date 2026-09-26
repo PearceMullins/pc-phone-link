@@ -69,6 +69,7 @@ from .windows_host import (
     release_all_game_keys,
     release_all_key_events,
     restore_window,
+    secure_desktop_active,
     send_key_event,
     send_text,
     window_to_dict,
@@ -763,6 +764,12 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
         return {"ok": True, "applied": bool(applied)}
 
     register_stream_routes(app, require_token=lambda request: _require_token(app, request))
+
+    @app.get("/api/secure-desktop")
+    async def secure_desktop(request: Request) -> dict[str, bool]:
+        _require_token(app, request)
+        active = _handle_window_action(secure_desktop_active)
+        return {"active": bool(active)}
 
     @app.websocket("/ws/input")
     async def input_socket(websocket: WebSocket) -> None:

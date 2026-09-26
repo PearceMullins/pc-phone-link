@@ -70,6 +70,8 @@ Pair a Bluetooth mouse and keyboard with your phone, then turn on **Settings > P
 
 Limits: Windows secure attention (Ctrl+Alt+Del) cannot be sent from a browser, and the phone OS may keep a few system-level combinations for itself. Everything is sent over your local network, so pointer and key latency tracks your Wi‑Fi quality.
 
+Permission prompts: when Windows shows a User Account Control prompt (for example while installing an app), it moves to a protected screen that no normal app can capture or click. The phone will show a notice explaining that you need to approve or cancel it on the PC, then the stream resumes on its own. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#screen-goes-black-while-installing-something-or-when-windows-asks-for-permission).
+
 iPad and iPhone notes: pair the mouse and keyboard in iPadOS **Settings > Bluetooth**, then use the page in Safari. iPadOS only sends hardware key events while an editable field holds focus, so the app keeps a hidden read-only capture field focused for you; tapping a text box still types locally. iPadOS may not deliver middle-click from some mice, and Apple's system shortcuts (Cmd+Tab, Cmd+H, Cmd+Q) stay with iPadOS.
 
 Any phone or tablet works: Android (Chrome, Samsung Internet, Firefox), iPadOS and iOS Safari, and desktop browsers all use the same setting. The app waits for movement or a key instead of assuming a platform, and the status line in Settings reports what it sees. Devices or browsers that do not report hover still work: the first click moves the PC pointer into place before it clicks, so click, drag, double click, and the wheel all land on the right spot. The wheel direction follows the platform's natural direction by default, and **Invert mouse wheel** flips it for any device.

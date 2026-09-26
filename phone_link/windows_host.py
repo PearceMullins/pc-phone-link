@@ -63,6 +63,8 @@ PER_MONITOR_DPI_AWARE = 2
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
 _DPI_AWARENESS_READY = False
 GAME_KEY_LEASE_SECONDS = 2.0
+DESKTOP_READOBJECTS = 0x0001
+UOI_NAME = 2
 
 send_message_timeout = user32.SendMessageTimeoutW
 send_message_timeout.argtypes = [
@@ -75,6 +77,45 @@ send_message_timeout.argtypes = [
     ctypes.POINTER(ULONG_PTR),
 ]
 send_message_timeout.restype = wintypes.LPARAM
+
+open_input_desktop = user32.OpenInputDesktop
+open_input_desktop.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+open_input_desktop.restype = wintypes.HANDLE
+
+close_desktop = user32.CloseDesktop
+close_desktop.argtypes = [wintypes.HANDLE]
+close_desktop.restype = wintypes.BOOL
+
+get_user_object_information = user32.GetUserObjectInformationW
+get_user_object_information.argtypes = [
+    wintypes.HANDLE,
+    ctypes.c_int,
+    ctypes.c_void_p,
+    wintypes.DWORD,
+    ctypes.POINTER(wintypes.DWORD),
+]
+get_user_object_information.restype = wintypes.BOOL
+
+
+def secure_desktop_active() -> bool:
+    """Report whether Windows is showing a UAC or sign-in prompt on the protected desktop."""
+    desktop = open_input_desktop(0, False, DESKTOP_READOBJECTS)
+    if not desktop:
+        return True
+    try:
+        needed = wintypes.DWORD(0)
+        buffer = ctypes.create_unicode_buffer(256)
+        if not get_user_object_information(
+            desktop,
+            UOI_NAME,
+            buffer,
+            ctypes.sizeof(buffer),
+            ctypes.byref(needed),
+        ):
+            return True
+        return buffer.value.strip().lower() != "default"
+    finally:
+        close_desktop(desktop)
 
 
 def enable_dpi_awareness() -> bool:

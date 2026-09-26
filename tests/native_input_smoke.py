@@ -113,6 +113,7 @@ def main() -> None:
                   window.__nativeRealToken = state.token;
                   apiFetch = async (path, options = {}) => {
                     const payload = options.body ? JSON.parse(options.body) : {};
+                    if (path.includes('/secure-desktop')) return { active: Boolean(window.__secureDesktopActive) };
                     if (path.includes('/key-event')) keyCalls.push({ path, payload });
                     else if (path.includes('/pointer')) calls.push({ path, payload });
                     return { ok: true, applied: true, cursor: { x: 0.5, y: 0.5, visible: true } };
@@ -178,6 +179,14 @@ def main() -> None:
                   await drain();
                   const realTouchActions = actions();
                   state.gestureArm = savedArm;
+
+                  window.__secureDesktopActive = true;
+                  await pollSecureDesktop();
+                  const secureNoticeShown = !elements.secureDesktopNotice.classList.contains('hidden');
+                  window.__secureDesktopActive = false;
+                  await pollSecureDesktop();
+                  const secureNoticeHidden = elements.secureDesktopNotice.classList.contains('hidden');
+                  delete window.__secureDesktopActive;
 
                   pointer('pointermove', 1, center.x, center.y);
                   await drain();
@@ -283,6 +292,7 @@ def main() -> None:
                   loadViewerPreferences();
                   setControlMode('touch');
                   state.selectedWindow = null;
+                  syncSecureDesktopPolling();
                   resetViewer();
                   apiFetch = window.__nativeRealApiFetch;
                   state.token = window.__nativeRealToken;
@@ -290,7 +300,7 @@ def main() -> None:
                   delete window.__nativeRealToken;
                   return {
                     defaultOff, defaultInvert, enabled, statusAfterEnable, statusAfterMouse, hoverActions,
-                    echoSuppressed, realTouchActions,
+                    echoSuppressed, realTouchActions, secureNoticeShown, secureNoticeHidden,
                     dragActions, dragReleased, unsyncedClickActions, clickActions,
                     unsyncedWheelCalls, syncedWheelCalls, invertedWheelCalls, invertStored,
                     prevented, keyActions, typedWithoutFocus, statusAfterKeys, fallbackPrevented, fallbackActions, focusStolenBack,
@@ -306,6 +316,7 @@ def main() -> None:
             assert "Mouse: active" in report["statusAfterMouse"], report
             assert report["echoSuppressed"], report
             assert report["realTouchActions"] == ["touch_tap"], report
+            assert report["secureNoticeShown"] and report["secureNoticeHidden"], report
             assert report["dragActions"] == ["down_current", "move", "up_current"], report
             assert report["dragReleased"], report
             assert report["unsyncedClickActions"] == ["down", "up_current"], report

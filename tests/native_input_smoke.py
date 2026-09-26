@@ -115,6 +115,10 @@ def main() -> None:
                   apiFetch = async (path, options = {}) => {
                     const payload = options.body ? JSON.parse(options.body) : {};
                     if (path.includes('/secure-desktop')) return { active: Boolean(window.__secureDesktopActive) };
+                    if (path.includes('/system/restart-host')) {
+                      window.__restartCalls = (window.__restartCalls || 0) + 1;
+                      return { ok: true };
+                    }
                     if (path.includes('/key-event')) keyCalls.push({ path, payload });
                     else if (path.includes('/pointer')) {
                       pointerTypes.push(payload.pointer_type);
@@ -205,6 +209,26 @@ def main() -> None:
                   const mousePointerTypesRecorded = pointerTypes.filter(type => type && type !== "touch");
                   const allMousePointers = pointerTypes.includes("mouse")
                     && mousePointerTypesRecorded.every(type => type === "mouse");
+
+                  const realConfirm = window.confirm;
+                  window.confirm = () => true;
+                  elements.restartHost.click();
+                  await new Promise(resolve => setTimeout(resolve, 0));
+                  await new Promise(resolve => setTimeout(resolve, 0));
+                  const restartRequested = window.__restartCalls === 1;
+                  const reconnectScheduled = Boolean(state.hostReconnectTimer);
+                  clearHostReconnectPolling();
+                  window.confirm = realConfirm;
+                  delete window.__restartCalls;
+                  const restartConfirmCancelled = await (async () => {
+                    window.confirm = () => false;
+                    elements.restartHost.click();
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                    const skipped = !window.__restartCalls;
+                    window.confirm = realConfirm;
+                    delete window.__restartCalls;
+                    return skipped;
+                  })();
 
                   pointer('pointermove', 1, center.x, center.y);
                   await drain();
@@ -320,6 +344,7 @@ def main() -> None:
                     defaultOff, defaultInvert, enabled, statusAfterEnable, statusAfterMouse, hoverActions,
                     echoSuppressed, realTouchActions, secureNoticeShown, secureNoticeHidden,
                     followedMouse, followIgnoredForTouch, allMousePointers,
+                    restartRequested, reconnectScheduled, restartConfirmCancelled,
                     dragActions, dragReleased, unsyncedClickActions, clickActions,
                     unsyncedWheelCalls, syncedWheelCalls, invertedWheelCalls, invertStored,
                     prevented, keyActions, typedWithoutFocus, statusAfterKeys, fallbackPrevented, fallbackActions, focusStolenBack,
@@ -337,6 +362,8 @@ def main() -> None:
             assert report["realTouchActions"] == ["touch_tap"], report
             assert report["secureNoticeShown"] and report["secureNoticeHidden"], report
             assert report["allMousePointers"], report
+            assert report["restartRequested"] and report["reconnectScheduled"], report
+            assert report["restartConfirmCancelled"], report
             assert report["followedMouse"] and report["followIgnoredForTouch"], report
             assert report["dragActions"] == ["down_current", "move", "up_current"], report
             assert report["dragReleased"], report

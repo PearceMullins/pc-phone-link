@@ -10,7 +10,7 @@
   <title>PC Phone Link</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="/assets/styles.css?v=20260921i">
+  <link rel="stylesheet" href="/assets/styles.css?v=20260921j">
 </head>
 <body>
   <div id="app">
@@ -104,6 +104,7 @@
         <section class="native-input-section"><label class="toggle-setting" for="nativeInput"><span>Physical mouse &amp; keyboard</span><input id="nativeInput" type="checkbox"></label><p class="setting-help">Pass a Bluetooth mouse and keyboard paired to this phone or iPad straight to the PC: pointer movement, clicks, wheel scrolling, and keys reach Windows with Shift, Ctrl, Alt, and Win shortcuts. Touch controls keep working.</p><label class="toggle-setting" for="invertWheel"><span>Invert mouse wheel</span><input id="invertWheel" type="checkbox"></label><p id="nativeInputStatus" class="setting-help diagnostics-path" role="status">Mouse: waiting for movement. Keyboard: waiting for a key.</p></section>
         <section class="bottom-nav-settings" aria-labelledby="bottomNavTitle"><strong id="bottomNavTitle">Bottom bar</strong><p class="setting-help">Choose up to three shortcuts. Shortcuts, Controls, and Settings always stay available.</p><div id="bottomNavEditor" class="bottom-nav-editor"></div><div class="bottom-nav-add-row"><label class="sr-only" for="bottomNavAdd">Add shortcut</label><select id="bottomNavAdd" class="setting-select" aria-label="Shortcut to add"></select><button id="bottomNavAddButton" class="ghost-button" type="button">Add</button></div><button id="bottomNavReset" class="ghost-button" type="button">Reset bottom bar</button></section>
         <section class="settings-power-section" aria-labelledby="settingsPowerTitle"><div class="settings-power-header"><strong id="settingsPowerTitle">PC power</strong><button id="settingsPowerToggle" class="ghost-button compact-button" type="button" aria-expanded="false" aria-controls="settingsPowerMenu" aria-haspopup="true">Power controls</button></div><div id="settingsPowerMenu" class="settings-power-menu hidden"><button type="button" class="power-menu-item" data-power-action="lock">Lock</button><button type="button" class="power-menu-item" data-power-action="sleep">Sleep</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="restart">Restart</button><button type="button" class="power-menu-item power-menu-danger" data-power-action="shutdown">Shut down</button></div></section>
+        <section class="settings-power-section" aria-labelledby="settingsHostTitle"><div class="settings-power-header"><strong id="settingsHostTitle">Host app</strong><button id="restartHost" class="ghost-button compact-button" type="button">Restart app</button></div><p class="setting-help">Restarts PC Phone Link on the PC with the same settings. The phone reconnects by itself in a few seconds.</p></section>
         <section class="trusted-devices-section"><div class="trusted-devices-header"><span>Trusted phones</span><button id="refreshTrustedDevices" class="ghost-button compact-button" type="button">Refresh</button></div><p id="trustedDevicesStatus" class="trusted-devices-status">No saved phones loaded.</p><div id="trustedDevices" class="trusted-devices-list"></div></section>
         <section class="diagnostics-section"><label class="toggle-setting" for="gestureDiagnostics"><span>Gesture diagnostics</span><input id="gestureDiagnostics" type="checkbox" checked></label><p class="setting-help">Records gesture states, safe coordinates, delivery results, and Windows touch errors. Never records typed text, connection codes, addresses, tokens, or window names.</p><p id="gestureLogPath" class="diagnostics-path">Log path loads after connection.</p><button id="clearGestureLogs" class="ghost-button" type="button">Clear gesture logs</button></section>
       </section>
@@ -155,7 +156,7 @@
   <script src="/assets/gestures.js?v=20260718a" defer></script>
   <script src="/assets/gesture-arms.js?v=20260818e" defer></script>
   <script src="/assets/game-controls.js?v=20260819f" defer></script>
-  <script src="/assets/keyboard-keys.js?v=20260921i" defer></script>
-  <script src="/assets/app.js?v=20260921i" defer></script>
+  <script src="/assets/keyboard-keys.js?v=20260921j" defer></script>
+  <script src="/assets/app.js?v=20260921j" defer></script>
 </body>
 </html>

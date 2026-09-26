@@ -43,6 +43,7 @@ Stream individual windows or your full desktop, send touch and keyboard input, m
 - **Window management** — List, focus, maximize, restore, and Phone Fit resize
 - **Connect code pairing** — Desktop GUI and phone show the same 4-digit code; tap Connect after confirming they match; remove connected phones from the PC window
 - **Power actions** — Lock, sleep, restart, shutdown from Settings on phone and iPad; desktop Power remains available
+- **Restart host from the phone** — Settings > Host app restarts PC Phone Link with the same settings and the phone reconnects by itself
 - **Single server** — One URL on port **8765** for the full control experience
 - **Wake-on-LAN** — Optional relay service and Android companion for magic-packet wake
 - **Auto-start** — Install a Windows Startup shortcut for hands-free launch at sign-in
@@ -194,6 +195,7 @@ Game control style and pad/joystick choice persist on each phone. Controls also 
 
 - **Focus**, **Maximize**, **Restore**, and **Phone Fit** from the window panel
 - **Lock**, **Sleep**, **Restart**, and **Shut down** from the power menu
+- **Restart app** from **Settings > Host app** restarts the host with the same settings; the phone reconnects automatically
 - **Power on** (when configured) sends a Wake-on-LAN packet via an optional relay URL
 
 More detail: [docs/USAGE.md](docs/USAGE.md) · Problems: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)

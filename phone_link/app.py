@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import ctypes
+import os
 import subprocess
 import threading
 import time
@@ -50,6 +51,7 @@ from .app_launcher import (
     run_quick_action,
 )
 from .file_browser import FileBrowserError, list_directory, open_path, reveal_in_file_explorer
+from . import host_restart
 from .pins_store import PinError, add_pin, list_pins, remove_pin
 from .windows_host import (
     FULLSCREEN_TARGET_HWND,
@@ -481,6 +483,23 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
         log_event("host", "power-action-finished", {"action": payload.action})
         return {"ok": True}
 
+    @app.post("/api/system/restart-host")
+    async def restart_host(request: Request) -> dict[str, bool]:
+        _require_token(app, request)
+        plan_path = host_restart.write_restart_plan(
+            host_restart.plan_file_path(),
+            pid=os.getpid(),
+            command=host_restart.relaunch_command(),
+            cwd=str(Path.cwd()),
+            port=int(getattr(app.state, "host_port", 0) or 0),
+        )
+        host_restart.launch_helper(plan_path)
+        release_all_game_keys(reason="host-restart")
+        release_all_key_events(reason="host-restart")
+        log_event("host", "host-restart-requested", {"port": getattr(app.state, "host_port", None)})
+        host_restart.schedule_process_exit()
+        return {"ok": True}
+
     @app.post("/api/system/text-size")
     async def system_text_size(payload: TextSizeRequest, request: Request) -> dict[str, Any]:
         _require_token(app, request)
@@ -884,6 +903,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Keep per-request console lines hidden (the default).",
     )
+    parser.add_argument(
+        "--restart-helper",
+        default=None,
+        metavar="PLAN",
+        help=argparse.SUPPRESS,
+    )
     return parser
 
 
@@ -902,6 +927,9 @@ def _resolve_console_logging(args: argparse.Namespace) -> tuple[str, bool]:
 
 def main() -> int:
     args = _build_arg_parser().parse_args()
+    if args.restart_helper:
+        return host_restart.run_restart_helper(args.restart_helper)
+
     console_log_level, console_access_log = _resolve_console_logging(args)
 
     connect_code = generate_connect_code()
@@ -932,6 +960,8 @@ def main() -> int:
     app = create_app(connect_code=connect_code, default_fps=args.fps, wake_relay_url=wake_relay_url)
     app.state.access_urls = access_urls
     app.state.port = args.port
+    app.state.host_port = args.port
+    app.state.host_bind = args.host
     app.state.gui_enabled = not args.no_gui
 
     print("=" * 72)

@@ -102,6 +102,10 @@ On phone and iPad, open **Settings > PC power > Power controls**. Restart and Sh
 
 If a Wake-on-LAN relay URL was configured at startup, **Power on** sends a wake packet to bring the PC back from a soft-off state (requires BIOS and adapter WoL support).
 
+## Restart the host app
+
+**Settings > Host app > Restart app** restarts PC Phone Link on the PC while keeping the same host, port, FPS, and wake-relay settings. The PC window reappears with a fresh connect code when the desktop GUI is enabled, and the phone reconnects by itself within a few seconds using its saved pairing, so there is no need to re-enter a code. Use it after changing host settings or when the host stops responding but the PC is still running.
+
 ## Single server
 
 | Service | Port | URL purpose |

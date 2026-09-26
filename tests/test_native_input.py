@@ -206,6 +206,17 @@ def test_secure_desktop_route_reports_host_state() -> None:
     assert response.json() == {"active": True}
 
 
+def test_host_restart_assets_are_wired() -> None:
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="restartHost"' in html
+    assert '"/api/system/restart-host"' in script
+    assert "restartHostApp" in script
+    assert "scheduleHostReconnect" in script
+    assert '"/api/system/power"' in script
+
+
 def test_physical_input_passthrough_assets_are_wired() -> None:
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     script = (STATIC / "app.js").read_text(encoding="utf-8")

@@ -345,6 +345,7 @@ const elements = {
   nativeInputStatus: document.getElementById("nativeInputStatus"),
   invertWheel: document.getElementById("invertWheel"),
   secureDesktopNotice: document.getElementById("secureDesktopNotice"),
+  restartHost: document.getElementById("restartHost"),
   powerMenu: document.getElementById("powerMenu"),
   powerToggle: document.getElementById("powerToggle"),
   settingsPowerMenu: document.getElementById("settingsPowerMenu"),
@@ -5459,6 +5460,25 @@ async function requestPowerAction(action) {
   showToast(config.done);
 }
 
+async function restartHostApp() {
+  if (!window.confirm("Restart PC Phone Link on the PC? The phone reconnects by itself.")) {
+    return;
+  }
+  try {
+    await apiFetch("/api/system/restart-host", { method: "POST" });
+  } catch (error) {
+    showToast(error.message || "Could not restart PC Phone Link.");
+    return;
+  }
+  showToast("Restarting PC Phone Link. The phone will reconnect automatically.");
+  clearHostReconnectPolling();
+  setConnectionStatus("Restarting", false);
+  state.hostReconnectTimer = window.setTimeout(() => {
+    state.hostReconnectTimer = null;
+    scheduleHostReconnect();
+  }, 1500);
+}
+
 function handleTextInput() {
   saveMessageDraft();
   autoResizeTextInput();
@@ -6369,6 +6389,9 @@ if (elements.followMouse) {
   });
 }
 elements.refreshTrustedDevices.addEventListener("click", () => refreshTrustedDevices().catch((error) => showToast(error.message)));
+if (elements.restartHost) {
+  elements.restartHost.addEventListener("click", () => restartHostApp());
+}
 if (elements.restoreWindow) {
   elements.restoreWindow.addEventListener("click", () => restoreSelectedWindow().catch((error) => showToast(error.message)));
 }

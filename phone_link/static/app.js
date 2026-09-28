@@ -112,6 +112,7 @@ const state = {
   secureDesktopActive: false,
   secureDesktopTimer: null,
   secureDesktopPollInFlight: false,
+  followBluetoothMouse: true,
   invertWheel: false,
   nativeMousePointerId: null,
   nativeMouseLeftDown: false,
@@ -178,6 +179,7 @@ const BOTTOM_NAV_STORAGE_KEY = "pc-phone-link-bottom-nav";
 const GESTURE_DIAGNOSTICS_STORAGE_KEY = "pc-phone-link-gesture-diagnostics";
 const NATIVE_INPUT_STORAGE_KEY = "pc-phone-link-native-input";
 const INVERT_WHEEL_STORAGE_KEY = "pc-phone-link-invert-wheel";
+const FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY = "pc-phone-link-follow-bluetooth-mouse";
 const MAX_GESTURE_LOG_BUFFER = 240;
 const RECENT_WINDOWS_STORAGE_KEY = "pc-phone-link-recent-windows";
 const STREAM_FPS_STORAGE_KEY = "pc-phone-link-stream-fps";
@@ -344,6 +346,7 @@ const elements = {
   nativeInputCapture: document.getElementById("nativeInputCapture"),
   nativeInputStatus: document.getElementById("nativeInputStatus"),
   invertWheel: document.getElementById("invertWheel"),
+  followBluetoothMouse: document.getElementById("followBluetoothMouse"),
   secureDesktopNotice: document.getElementById("secureDesktopNotice"),
   restartHost: document.getElementById("restartHost"),
   powerMenu: document.getElementById("powerMenu"),
@@ -1566,7 +1569,7 @@ function nudgeCameraForTyping(text = "", direction = "forward") {
   queueFollowTypingLog("nudge-forward", buildFollowTypingLogDetails({ direction, textLength: text.length }));
 }
 
-function updateCursorPosition(cursor, { allowMouseFollow = false, forceFollow = false } = {}) {
+function updateCursorPosition(cursor, { allowMouseFollow = false, follow = false } = {}) {
   if (!cursor) {
     return;
   }
@@ -1580,7 +1583,7 @@ function updateCursorPosition(cursor, { allowMouseFollow = false, forceFollow = 
     visible: Boolean(cursor.visible),
   };
 
-  if ((state.followMouse || forceFollow) && allowMouseFollow && state.cursorPosition.visible) {
+  if (allowMouseFollow && follow && state.cursorPosition.visible) {
     syncCameraToCursor();
   }
 }
@@ -1614,6 +1617,7 @@ function loadViewerPreferences() {
   state.nativeInputEnabled = window.localStorage.getItem(NATIVE_INPUT_STORAGE_KEY) === "true";
   const savedInvertWheel = window.localStorage.getItem(INVERT_WHEEL_STORAGE_KEY);
   state.invertWheel = savedInvertWheel === null ? applePointerDevice() : savedInvertWheel === "true";
+  state.followBluetoothMouse = window.localStorage.getItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY) !== "false";
   state.gestureSessionId = diagnosticId("session");
   const savedStreamFps = Number.parseInt(window.localStorage.getItem(STREAM_FPS_STORAGE_KEY) || "", 10);
   if (Number.isFinite(savedStreamFps)) {
@@ -1630,6 +1634,7 @@ function loadViewerPreferences() {
   if (elements.gestureDiagnostics) elements.gestureDiagnostics.checked = state.gestureDiagnosticsEnabled;
   if (elements.nativeInput) elements.nativeInput.checked = state.nativeInputEnabled;
   if (elements.invertWheel) elements.invertWheel.checked = state.invertWheel;
+  if (elements.followBluetoothMouse) elements.followBluetoothMouse.checked = state.followBluetoothMouse;
   syncNativeInputUi();
   if (elements.mouseSpeed) elements.mouseSpeed.value = String(state.mouseSpeed);
   if (elements.followMouse) elements.followMouse.checked = state.followMouse;
@@ -2456,9 +2461,10 @@ function queueJsonPost(path, payload) {
 function handlePointerResponse(response, action = "", pointerType = "") {
   if (response?.cursor) {
     const mousePointer = pointerType === "mouse";
+    const follow = mousePointer ? state.followBluetoothMouse : state.followMouse;
     updateCursorPosition(response.cursor, {
       allowMouseFollow: action === "move_relative" || mousePointer,
-      forceFollow: mousePointer,
+      follow,
     });
     if (action === "click_current") {
       setTypingAnchorFromCursor(response.cursor);
@@ -4634,6 +4640,12 @@ function setInvertWheel(value) {
   if (elements.invertWheel) elements.invertWheel.checked = state.invertWheel;
 }
 
+function setFollowBluetoothMouse(value) {
+  state.followBluetoothMouse = Boolean(value);
+  window.localStorage.setItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY, String(state.followBluetoothMouse));
+  if (elements.followBluetoothMouse) elements.followBluetoothMouse.checked = state.followBluetoothMouse;
+}
+
 function handleNativeWheel(event) {
   if (!state.nativeInputEnabled || !state.selectedWindow) return;
   event.preventDefault();
@@ -6409,6 +6421,9 @@ if (elements.nativeInput) {
 }
 if (elements.invertWheel) {
   elements.invertWheel.addEventListener("change", (event) => setInvertWheel(event.target.checked));
+}
+if (elements.followBluetoothMouse) {
+  elements.followBluetoothMouse.addEventListener("change", (event) => setFollowBluetoothMouse(event.target.checked));
 }
 if (elements.nativeInputCapture) {
   elements.nativeInputCapture.addEventListener("blur", () => {

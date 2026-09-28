@@ -130,9 +130,12 @@ def main() -> None:
                   state.gestureSessionId = 'native-test-session';
                   localStorage.removeItem(NATIVE_INPUT_STORAGE_KEY);
                   localStorage.removeItem(INVERT_WHEEL_STORAGE_KEY);
+                  localStorage.removeItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY);
                   loadViewerPreferences();
                   const defaultOff = state.nativeInputEnabled === false && elements.nativeInput.checked === false;
                   const defaultInvert = state.invertWheel;
+                  const defaultFollow = state.followBluetoothMouse === true
+                    && elements.followBluetoothMouse.checked === true;
 
                   updateSelectedWindow({ hwnd: 700, bounds: { width: 1280, height: 720 } });
                   openDestination('viewer');
@@ -203,6 +206,17 @@ def main() -> None:
                     && Math.abs(state.cameraFocus.y - 0.66) < 0.01;
                   handlePointerResponse({ cursor: { x: 0.5, y: 0.5, visible: true } }, "move", "");
                   const followIgnoredForTouch = Math.abs(state.cameraFocus.x - 0.22) < 0.01;
+                  setFollowBluetoothMouse(false);
+                  handlePointerResponse({ cursor: { x: 0.8, y: 0.2, visible: true } }, "move", "mouse");
+                  const followDisabled = Math.abs(state.cameraFocus.x - 0.22) < 0.01;
+                  const followStoredOff = localStorage.getItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY) === "false"
+                    && elements.followBluetoothMouse.checked === false;
+                  state.followMouse = true;
+                  handlePointerResponse({ cursor: { x: 0.9, y: 0.1, visible: true } }, "move", "mouse");
+                  const followIndependentOfTrackpad = Math.abs(state.cameraFocus.x - 0.22) < 0.01;
+                  state.followMouse = false;
+                  setFollowBluetoothMouse(true);
+                  const followStoredOn = localStorage.getItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY) === "true";
                   setCameraScale(1, { snap: false });
                   state.cameraFocus = savedFocus;
                   applyCameraTransform();
@@ -341,9 +355,10 @@ def main() -> None:
                   delete window.__nativeRealApiFetch;
                   delete window.__nativeRealToken;
                   return {
-                    defaultOff, defaultInvert, enabled, statusAfterEnable, statusAfterMouse, hoverActions,
+                    defaultOff, defaultInvert, defaultFollow, enabled, statusAfterEnable, statusAfterMouse, hoverActions,
                     echoSuppressed, realTouchActions, secureNoticeShown, secureNoticeHidden,
                     followedMouse, followIgnoredForTouch, allMousePointers,
+                    followDisabled, followStoredOff, followIndependentOfTrackpad, followStoredOn,
                     restartRequested, reconnectScheduled, restartConfirmCancelled,
                     dragActions, dragReleased, unsyncedClickActions, clickActions,
                     unsyncedWheelCalls, syncedWheelCalls, invertedWheelCalls, invertStored,
@@ -355,6 +370,7 @@ def main() -> None:
             )
             assert report["defaultOff"], report
             assert report["defaultInvert"] is False, report
+            assert report["defaultFollow"], report
             assert report["enabled"], report
             assert report["hoverActions"] == ["move"], report
             assert "Mouse: active" in report["statusAfterMouse"], report
@@ -365,6 +381,8 @@ def main() -> None:
             assert report["restartRequested"] and report["reconnectScheduled"], report
             assert report["restartConfirmCancelled"], report
             assert report["followedMouse"] and report["followIgnoredForTouch"], report
+            assert report["followDisabled"] and report["followStoredOff"], report
+            assert report["followIndependentOfTrackpad"] and report["followStoredOn"], report
             assert report["dragActions"] == ["down_current", "move", "up_current"], report
             assert report["dragReleased"], report
             assert report["unsyncedClickActions"] == ["down", "up_current"], report

@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Type without tapping** - While passthrough is on, physical keyboard keys reach the PC immediately with no focus tap; focus returns to the PC view after using phone buttons, and tapping a text field or the Keyboard composer keeps local typing
 - **Keyboard status line** - Settings shows whether the app is waiting for a key or receiving them, and Settings re-focuses the capture field when the page regains focus
 - **Cross-platform mobile input** - The same Settings toggle works on Android, iPadOS, and iOS browsers; the status line reports mouse and keyboard activity on any device
-- **Bluetooth mouse follow** - While zoomed in, the viewer follows the Bluetooth mouse cursor the same way Follow mouse follows the trackpad
+- **Bluetooth mouse follow** - While zoomed in, the viewer follows the Bluetooth mouse cursor, with its own **Follow Bluetooth mouse** toggle in Settings that works independently of the trackpad Follow mouse setting
 - **Permission prompt notice** - When Windows shows a UAC prompt on its protected desktop, the viewer explains that the prompt must be approved on the PC instead of showing a silent black screen
 - **Restart host from the phone** - Settings > Host app restarts PC Phone Link with the same host, port, FPS, and wake-relay arguments; a detached helper waits for the old process and the port, relaunches the host, and the phone reconnects with its saved pairing
 - `/api/windows/{hwnd}/key-event` forwards one named key transition through `SendInput`, and held keys or mouse buttons release automatically on focus loss, panel change, or shutdown

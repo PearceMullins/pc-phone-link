@@ -196,7 +196,7 @@ const PAN_CHORD_PAIRS = Object.freeze({
   "middle-left": [1, 0],
   "left-right": [0, 2],
 });
-const UI_BUILD = "20260921q";
+const UI_BUILD = "20260921r";
 const INVERT_WHEEL_STORAGE_KEY = "pc-phone-link-invert-wheel";
 const FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY = "pc-phone-link-follow-bluetooth-mouse";
 const MAX_GESTURE_LOG_BUFFER = 240;
@@ -4779,6 +4779,32 @@ function updateNativePan(event) {
   }
 }
 
+function nativePressedButtons(event) {
+  const mask = Number.isFinite(event.buttons) ? event.buttons : 0;
+  const pressed = new Set();
+  if (mask & 1) pressed.add(0);
+  if (mask & 2) pressed.add(2);
+  if (mask & 4) pressed.add(1);
+  return pressed;
+}
+
+function activateNativePan(event, pair) {
+  state.panChordHeld = new Set(pair);
+  pair.forEach((button) => {
+    const pending = state.panChordPending.get(button);
+    if (pending) {
+      window.clearTimeout(pending.timer);
+      state.panChordPending.delete(button);
+    }
+    state.panChordSuppressed.add(button);
+  });
+  if (state.panActive) {
+    state.panLastClient = { x: event.clientX, y: event.clientY };
+    return;
+  }
+  beginNativePan(event);
+}
+
 function handleNativeMouseDown(event) {
   if (!state.selectedWindow) return;
   event.preventDefault();
@@ -4790,18 +4816,11 @@ function handleNativeMouseDown(event) {
   state.nativeMousePointerId = event.pointerId;
   setPointerCaptureSafely(event);
   const pair = panChordButtons();
+  const pressed = nativePressedButtons(event);
   if (pair && pair.includes(event.button)) {
     state.panChordHeld.add(event.button);
-    if (pair.every((button) => state.panChordHeld.has(button))) {
-      pair.forEach((button) => {
-        const pending = state.panChordPending.get(button);
-        if (pending) {
-          window.clearTimeout(pending.timer);
-          state.panChordPending.delete(button);
-        }
-        state.panChordSuppressed.add(button);
-      });
-      beginNativePan(event);
+    if (pair.every((button) => state.panChordHeld.has(button) || pressed.has(button))) {
+      activateNativePan(event, pair);
       return;
     }
     const button = event.button;
@@ -4819,6 +4838,16 @@ function handleNativeMouseDown(event) {
 
 function handleNativeMouseMove(event) {
   if (!state.selectedWindow) return;
+  const pair = panChordButtons();
+  if (pair && !state.panActive) {
+    const pressed = nativePressedButtons(event);
+    if (pair.every((button) => pressed.has(button))) {
+      event.preventDefault();
+      recordNativeMouseEvent(event);
+      activateNativePan(event, pair);
+      return;
+    }
+  }
   if (state.panActive) {
     event.preventDefault();
     recordNativeMouseEvent(event);
@@ -4838,7 +4867,9 @@ function handleNativeMouseUp(event) {
   if (pair && pair.includes(event.button)) {
     event.preventDefault();
     recordNativeMouseEvent(event);
-    state.panChordHeld.delete(event.button);
+    const remaining = new Set([...nativePressedButtons(event)].filter((button) => pair.includes(button)));
+    remaining.delete(event.button);
+    state.panChordHeld = remaining;
     const pending = state.panChordPending.get(event.button);
     if (pending) {
       window.clearTimeout(pending.timer);

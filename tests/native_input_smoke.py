@@ -315,6 +315,20 @@ def main() -> None:
                   const loneWheelClicks = calls.some(item => item.payload.action === "middle_click_current"
                     || item.payload.action === "middle_tap");
                   calls.splice(0);
+
+                  pointer('pointerdown', 43, panStart.x, panStart.y, { button: 1, buttons: 4 });
+                  pointer('pointermove', 43, panStart.x - 10, panStart.y - 10, { button: 1, buttons: 6 });
+                  const maskPanStarted = state.panActive === true && calls.length === 0;
+                  await new Promise(resolve => setTimeout(resolve, 320));
+                  const maskPanClickCancelled = calls.length === 0;
+                  const maskFocusBefore = { ...state.cameraFocus };
+                  pointer('pointermove', 43, panStart.x - 90, panStart.y - 70, { button: 1, buttons: 6 });
+                  const maskPanMoved = Math.abs(state.cameraFocus.x - maskFocusBefore.x) > 0.001
+                    || Math.abs(state.cameraFocus.y - maskFocusBefore.y) > 0.001;
+                  pointer('pointerup', 43, panStart.x - 90, panStart.y - 70, { button: 1, buttons: 0 });
+                  await drain();
+                  const maskPanEnded = state.panActive === false && state.panChordHeld.size === 0;
+                  calls.splice(0);
                   setCameraScale(1, { snap: false });
                   state.cameraFocus = savedFocus;
                   applyCameraTransform();
@@ -463,6 +477,7 @@ def main() -> None:
                     socketActions, socketPayloadsValid, socketNoHttpFallback,
                     panModeStored, panWaitsForChord, panStarted, panMoved, panNoClicks,
                     panEnded, panNoClicksAfterRelease, loneWheelClicks, panModeReset,
+                    maskPanStarted, maskPanClickCancelled, maskPanMoved, maskPanEnded,
                     restartRequested, reconnectScheduled, restartConfirmCancelled,
                     dragActions, dragReleased, unsyncedClickActions, clickActions,
                     unsyncedWheelCalls, syncedWheelCalls, invertedWheelCalls, invertStored,
@@ -496,6 +511,8 @@ def main() -> None:
             assert report["panStarted"] and report["panMoved"], report
             assert report["panNoClicks"] and report["panEnded"] and report["panNoClicksAfterRelease"], report
             assert report["loneWheelClicks"] and report["panModeReset"], report
+            assert report["maskPanStarted"] and report["maskPanClickCancelled"], report
+            assert report["maskPanMoved"] and report["maskPanEnded"], report
             assert report["dragActions"] == ["down_current", "move", "up_current"], report
             assert report["dragReleased"], report
             assert report["unsyncedClickActions"] == ["down", "up_current"], report

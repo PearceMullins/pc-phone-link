@@ -196,7 +196,7 @@ const PAN_CHORD_PAIRS = Object.freeze({
   "middle-left": [1, 0],
   "left-right": [0, 2],
 });
-const UI_BUILD = "20260921p";
+const UI_BUILD = "20260921q";
 const INVERT_WHEEL_STORAGE_KEY = "pc-phone-link-invert-wheel";
 const FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY = "pc-phone-link-follow-bluetooth-mouse";
 const MAX_GESTURE_LOG_BUFFER = 240;
@@ -1640,8 +1640,10 @@ function loadViewerPreferences() {
   const savedInvertWheel = window.localStorage.getItem(INVERT_WHEEL_STORAGE_KEY);
   state.invertWheel = savedInvertWheel === null ? applePointerDevice() : savedInvertWheel === "true";
   state.followBluetoothMouse = window.localStorage.getItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY) === "true";
-  const savedPanChord = window.localStorage.getItem(PAN_CHORD_STORAGE_KEY) || "off";
-  state.panChordMode = Object.prototype.hasOwnProperty.call(PAN_CHORD_PAIRS, savedPanChord) ? savedPanChord : "off";
+  const savedPanChord = window.localStorage.getItem(PAN_CHORD_STORAGE_KEY);
+  state.panChordMode = savedPanChord === null
+    ? "middle-right"
+    : (Object.prototype.hasOwnProperty.call(PAN_CHORD_PAIRS, savedPanChord) ? savedPanChord : "middle-right");
   state.gestureSessionId = diagnosticId("session");
   const savedStreamFps = Number.parseInt(window.localStorage.getItem(STREAM_FPS_STORAGE_KEY) || "", 10);
   if (Number.isFinite(savedStreamFps)) {

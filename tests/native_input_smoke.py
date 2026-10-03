@@ -139,11 +139,14 @@ def main() -> None:
                   localStorage.removeItem(NATIVE_INPUT_STORAGE_KEY);
                   localStorage.removeItem(INVERT_WHEEL_STORAGE_KEY);
                   localStorage.removeItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY);
+                  localStorage.removeItem(PAN_CHORD_STORAGE_KEY);
                   loadViewerPreferences();
                   const defaultOff = state.nativeInputEnabled === false && elements.nativeInput.checked === false;
                   const defaultInvert = state.invertWheel;
                   const defaultFollow = state.followBluetoothMouse === false
                     && elements.followBluetoothMouse.checked === false;
+                  const defaultPanChord = state.panChordMode === "middle-right"
+                    && elements.panChord.value === "middle-right";
 
                   updateSelectedWindow({ hwnd: 700, bounds: { width: 1280, height: 720 } });
                   openDestination('viewer');
@@ -453,7 +456,7 @@ def main() -> None:
                   delete window.__nativeRealApiFetch;
                   delete window.__nativeRealToken;
                   return {
-                    defaultOff, defaultInvert, defaultFollow, enabled, statusAfterEnable, statusAfterMouse, hoverActions,
+                    defaultOff, defaultInvert, defaultFollow, defaultPanChord, enabled, statusAfterEnable, statusAfterMouse, hoverActions,
                     echoSuppressed, realTouchActions, secureNoticeShown, secureNoticeHidden, allMousePointers,
                     followDisabled, followStoredOff, followIndependentOfTrackpad, followStoredOn, controlsToggleEnabled,
                     followImmediate, followOnHover, centeredOnHover, responseFollowSuppressed, followIgnoredForTouch,
@@ -472,6 +475,7 @@ def main() -> None:
             assert report["defaultOff"], report
             assert report["defaultInvert"] is False, report
             assert report["defaultFollow"], report
+            assert report["defaultPanChord"], report
             assert report["enabled"], report
             assert report["hoverActions"] == ["move"], report
             assert "Mouse: active" in report["statusAfterMouse"], report

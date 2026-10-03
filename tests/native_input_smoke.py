@@ -124,7 +124,15 @@ def main() -> None:
                       pointerTypes.push(payload.pointer_type);
                       calls.push({ path, payload });
                     }
-                    return { ok: true, applied: true, cursor: { x: 0.5, y: 0.5, visible: true } };
+                    return {
+                      ok: true,
+                      applied: true,
+                      cursor: {
+                        x: Number.isFinite(payload.x) ? payload.x : 0.5,
+                        y: Number.isFinite(payload.y) ? payload.y : 0.5,
+                        visible: true,
+                      },
+                    };
                   };
                   state.token = 'native-test-token';
                   state.gestureSessionId = 'native-test-session';
@@ -155,6 +163,7 @@ def main() -> None:
                     for (let attempt = 0; attempt < 40; attempt += 1) {
                       await new Promise(resolve => setTimeout(resolve, 0));
                       if (!state.pendingTouchMovePayload && !state.moveRequestInFlight
+                        && !state.touchMoveScheduled
                         && !state.pendingWheelPayload && !state.wheelRequestInFlight) return;
                     }
                   };
@@ -224,6 +233,22 @@ def main() -> None:
                   state.followMouse = false;
                   setFollowBluetoothMouse(true);
                   const followStoredOn = localStorage.getItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY) === "true";
+
+                  setCameraScale(2, { snap: false });
+                  const hoverTarget = { x: center.x + 70, y: center.y - 40 };
+                  const expectedHoverFocus = viewerPointToSourceNormalized(hoverTarget.x, hoverTarget.y);
+                  pointer('pointermove', 21, hoverTarget.x, hoverTarget.y);
+                  await drain();
+                  const followOnHover = Boolean(expectedHoverFocus)
+                    && Math.abs(state.cameraFocus.x - expectedHoverFocus.x) < 0.02
+                    && Math.abs(state.cameraFocus.y - expectedHoverFocus.y) < 0.02;
+                  const centeredOnHover = Math.abs(state.cameraFocus.x - state.cursorPosition.x) < 0.02
+                    && Math.abs(state.cameraFocus.y - state.cursorPosition.y) < 0.02;
+                  setFollowBluetoothMouse(false);
+                  pointer('pointermove', 22, hoverTarget.x - 30, hoverTarget.y - 25);
+                  await drain();
+                  const hoverFollowDisabled = Math.abs(state.cameraFocus.x - expectedHoverFocus.x) < 0.02;
+                  setFollowBluetoothMouse(true);
                   setCameraScale(1, { snap: false });
                   state.cameraFocus = savedFocus;
                   applyCameraTransform();
@@ -366,6 +391,7 @@ def main() -> None:
                     echoSuppressed, realTouchActions, secureNoticeShown, secureNoticeHidden,
                     followedMouse, followIgnoredForTouch, allMousePointers,
                     followDisabled, followStoredOff, followIndependentOfTrackpad, followStoredOn, controlsToggleEnabled,
+                    followOnHover, centeredOnHover, hoverFollowDisabled,
                     restartRequested, reconnectScheduled, restartConfirmCancelled,
                     dragActions, dragReleased, unsyncedClickActions, clickActions,
                     unsyncedWheelCalls, syncedWheelCalls, invertedWheelCalls, invertStored,
@@ -391,6 +417,8 @@ def main() -> None:
             assert report["followDisabled"] and report["followStoredOff"], report
             assert report["followIndependentOfTrackpad"] and report["followStoredOn"], report
             assert report["controlsToggleEnabled"], report
+            assert report["followOnHover"] and report["centeredOnHover"], report
+            assert report["hoverFollowDisabled"], report
             assert report["dragActions"] == ["down_current", "move", "up_current"], report
             assert report["dragReleased"], report
             assert report["unsyncedClickActions"] == ["down", "up_current"], report

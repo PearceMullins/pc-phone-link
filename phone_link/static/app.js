@@ -3825,12 +3825,19 @@ function flushPendingWheel() {
 function schedulePendingTouchMove() {
   if (state.touchMoveScheduled || !state.pendingTouchMovePayload || !state.selectedWindow) return;
   state.touchMoveScheduled = true;
+  let sentPayload = null;
   queueControl(async () => {
     const payload = state.pendingTouchMovePayload;
     state.pendingTouchMovePayload = null;
     if (!payload || !state.selectedWindow) return null;
+    sentPayload = payload;
     return apiFetch(pointerPath(), { method: "POST", body: JSON.stringify(payload) });
   })
+    .then((response) => {
+      if (response && sentPayload) {
+        handlePointerResponse(response, sentPayload.action, sentPayload.pointer_type);
+      }
+    })
     .catch(handlePointerError)
     .finally(() => {
       state.touchMoveScheduled = false;

@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Hover follow** - Coalesced move requests now read their cursor response, so the zoomed view follows the Bluetooth mouse during plain movement instead of only after a click or wheel, and keeps the PC pointer centered while the mouse moves
 - Browsers that send both mouse and simulated touch events for one physical click no longer double-fire: a touch event that matches a fresh mouse position is ignored
 - Devices without hover support still click accurately because the first press positions the PC pointer before clicking
 

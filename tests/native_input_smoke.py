@@ -142,8 +142,8 @@ def main() -> None:
                   loadViewerPreferences();
                   const defaultOff = state.nativeInputEnabled === false && elements.nativeInput.checked === false;
                   const defaultInvert = state.invertWheel;
-                  const defaultFollow = state.followBluetoothMouse === true
-                    && elements.followBluetoothMouse.checked === true;
+                  const defaultFollow = state.followBluetoothMouse === false
+                    && elements.followBluetoothMouse.checked === false;
 
                   updateSelectedWindow({ hwnd: 700, bounds: { width: 1280, height: 720 } });
                   openDestination('viewer');
@@ -283,6 +283,41 @@ def main() -> None:
                   state.inputSocket = null;
                   state.inputSocketReady = false;
                   calls.splice(0);
+
+                  elements.panChord.value = "middle-right";
+                  elements.panChord.dispatchEvent(new Event('change', { bubbles: true }));
+                  const panModeStored = state.panChordMode === "middle-right"
+                    && localStorage.getItem(PAN_CHORD_STORAGE_KEY) === "middle-right";
+                  setCameraScale(2, { snap: false });
+                  const panStart = { x: center.x, y: center.y };
+                  const panFocusBefore = { ...state.cameraFocus };
+                  pointer('pointerdown', 41, panStart.x, panStart.y, { button: 1, buttons: 4 });
+                  const panWaitsForChord = !state.panActive && calls.length === 0;
+                  pointer('pointerdown', 41, panStart.x, panStart.y, { button: 2, buttons: 6 });
+                  const panStarted = state.panActive === true;
+                  pointer('pointermove', 41, panStart.x - 80, panStart.y - 60, { button: 2, buttons: 6 });
+                  const panMoved = Math.abs(state.cameraFocus.x - panFocusBefore.x) > 0.001
+                    || Math.abs(state.cameraFocus.y - panFocusBefore.y) > 0.001;
+                  const panNoClicks = calls.length === 0;
+                  pointer('pointerup', 41, panStart.x - 80, panStart.y - 60, { button: 2, buttons: 4 });
+                  pointer('pointerup', 41, panStart.x - 80, panStart.y - 60, { button: 1, buttons: 0 });
+                  await drain();
+                  const panEnded = state.panActive === false && state.panChordHeld.size === 0;
+                  const panNoClicksAfterRelease = calls.length === 0;
+
+                  pointer('pointerdown', 42, panStart.x, panStart.y, { button: 1, buttons: 4 });
+                  await new Promise(resolve => setTimeout(resolve, 320));
+                  pointer('pointerup', 42, panStart.x, panStart.y, { button: 1, buttons: 0 });
+                  await drain();
+                  const loneWheelClicks = calls.some(item => item.payload.action === "middle_click_current"
+                    || item.payload.action === "middle_tap");
+                  calls.splice(0);
+                  setCameraScale(1, { snap: false });
+                  state.cameraFocus = savedFocus;
+                  applyCameraTransform();
+                  elements.panChord.value = "off";
+                  elements.panChord.dispatchEvent(new Event('change', { bubbles: true }));
+                  const panModeReset = state.panChordMode === "off";
                   const mousePointerTypesRecorded = pointerTypes.filter(type => type && type !== "touch");
                   const allMousePointers = pointerTypes.includes("mouse")
                     && mousePointerTypesRecorded.every(type => type === "mouse");
@@ -423,6 +458,8 @@ def main() -> None:
                     followDisabled, followStoredOff, followIndependentOfTrackpad, followStoredOn, controlsToggleEnabled,
                     followImmediate, followOnHover, centeredOnHover, responseFollowSuppressed, followIgnoredForTouch,
                     socketActions, socketPayloadsValid, socketNoHttpFallback,
+                    panModeStored, panWaitsForChord, panStarted, panMoved, panNoClicks,
+                    panEnded, panNoClicksAfterRelease, loneWheelClicks, panModeReset,
                     restartRequested, reconnectScheduled, restartConfirmCancelled,
                     dragActions, dragReleased, unsyncedClickActions, clickActions,
                     unsyncedWheelCalls, syncedWheelCalls, invertedWheelCalls, invertStored,
@@ -451,6 +488,10 @@ def main() -> None:
             assert report["responseFollowSuppressed"] and report["followIgnoredForTouch"], report
             assert report["socketActions"] == ["move", "down_current", "up_current"], report
             assert report["socketPayloadsValid"] and report["socketNoHttpFallback"], report
+            assert report["panModeStored"] and report["panWaitsForChord"], report
+            assert report["panStarted"] and report["panMoved"], report
+            assert report["panNoClicks"] and report["panEnded"] and report["panNoClicksAfterRelease"], report
+            assert report["loneWheelClicks"] and report["panModeReset"], report
             assert report["dragActions"] == ["down_current", "move", "up_current"], report
             assert report["dragReleased"], report
             assert report["unsyncedClickActions"] == ["down", "up_current"], report

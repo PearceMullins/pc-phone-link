@@ -117,6 +117,12 @@ const state = {
   secureDesktopTimer: null,
   secureDesktopPollInFlight: false,
   followBluetoothMouse: true,
+  panChordMode: "off",
+  panChordHeld: new Set(),
+  panChordSuppressed: new Set(),
+  panChordPending: new Map(),
+  panActive: false,
+  panLastClient: null,
   invertWheel: false,
   nativeMousePointerId: null,
   nativeMouseLeftDown: false,
@@ -183,7 +189,14 @@ const BOTTOM_NAV_STORAGE_KEY = "pc-phone-link-bottom-nav";
 const GESTURE_DIAGNOSTICS_STORAGE_KEY = "pc-phone-link-gesture-diagnostics";
 const NATIVE_INPUT_STORAGE_KEY = "pc-phone-link-native-input";
 const INPUT_SOCKET_MAX_FAILURES = 5;
-const UI_BUILD = "20260921o";
+const PAN_CHORD_STORAGE_KEY = "pc-phone-link-pan-chord";
+const PAN_CHORD_WINDOW_MS = 220;
+const PAN_CHORD_PAIRS = Object.freeze({
+  "middle-right": [1, 2],
+  "middle-left": [1, 0],
+  "left-right": [0, 2],
+});
+const UI_BUILD = "20260921p";
 const INVERT_WHEEL_STORAGE_KEY = "pc-phone-link-invert-wheel";
 const FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY = "pc-phone-link-follow-bluetooth-mouse";
 const MAX_GESTURE_LOG_BUFFER = 240;
@@ -352,6 +365,7 @@ const elements = {
   nativeInputCapture: document.getElementById("nativeInputCapture"),
   nativeInputStatus: document.getElementById("nativeInputStatus"),
   invertWheel: document.getElementById("invertWheel"),
+  panChord: document.getElementById("panChord"),
   followBluetoothMouse: document.getElementById("followBluetoothMouse"),
   followBluetoothMouseControls: document.getElementById("followBluetoothMouseControls"),
   secureDesktopNotice: document.getElementById("secureDesktopNotice"),
@@ -1625,7 +1639,9 @@ function loadViewerPreferences() {
   state.nativeInputEnabled = window.localStorage.getItem(NATIVE_INPUT_STORAGE_KEY) === "true";
   const savedInvertWheel = window.localStorage.getItem(INVERT_WHEEL_STORAGE_KEY);
   state.invertWheel = savedInvertWheel === null ? applePointerDevice() : savedInvertWheel === "true";
-  state.followBluetoothMouse = window.localStorage.getItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY) !== "false";
+  state.followBluetoothMouse = window.localStorage.getItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY) === "true";
+  const savedPanChord = window.localStorage.getItem(PAN_CHORD_STORAGE_KEY) || "off";
+  state.panChordMode = Object.prototype.hasOwnProperty.call(PAN_CHORD_PAIRS, savedPanChord) ? savedPanChord : "off";
   state.gestureSessionId = diagnosticId("session");
   const savedStreamFps = Number.parseInt(window.localStorage.getItem(STREAM_FPS_STORAGE_KEY) || "", 10);
   if (Number.isFinite(savedStreamFps)) {
@@ -1643,6 +1659,7 @@ function loadViewerPreferences() {
   if (elements.uiBuild) elements.uiBuild.textContent = UI_BUILD;
   if (elements.nativeInput) elements.nativeInput.checked = state.nativeInputEnabled;
   if (elements.invertWheel) elements.invertWheel.checked = state.invertWheel;
+  if (elements.panChord) elements.panChord.value = state.panChordMode;
   syncFollowBluetoothMouseControls();
   syncNativeInputUi();
   if (elements.mouseSpeed) elements.mouseSpeed.value = String(state.mouseSpeed);
@@ -4665,6 +4682,7 @@ function releaseNativeKeys(reason) {
 }
 
 function releaseNativeMouseButton(reason) {
+  cancelNativePan(reason);
   if (!state.nativeMouseLeftDown) {
     state.nativeMousePointerId = null;
     return;
@@ -4699,6 +4717,66 @@ function sendNativeButtonAction(currentAction, moveAction, point) {
   }
 }
 
+function panChordButtons() {
+  return PAN_CHORD_PAIRS[state.panChordMode] || null;
+}
+
+function setPanChordMode(value) {
+  const next = Object.prototype.hasOwnProperty.call(PAN_CHORD_PAIRS, value) ? value : "off";
+  cancelNativePan("mode-change");
+  state.panChordMode = next;
+  window.localStorage.setItem(PAN_CHORD_STORAGE_KEY, next);
+  if (elements.panChord) elements.panChord.value = next;
+}
+
+function cancelNativePan(reason) {
+  state.panChordPending.forEach((pending) => window.clearTimeout(pending.timer));
+  state.panChordPending.clear();
+  state.panChordHeld.clear();
+  state.panChordSuppressed.clear();
+  state.panLastClient = null;
+  if (!state.panActive) return;
+  state.panActive = false;
+  logGestureDiagnostic("native-pan-end", { reason, state: "idle" });
+}
+
+function performNativeButtonDown(button, point) {
+  if (button === 0) {
+    state.nativeMouseLeftDown = true;
+    sendNativeButtonAction("down_current", "down", point);
+    return;
+  }
+  if (button === 1) {
+    sendNativeButtonAction("middle_click_current", "middle_tap", point);
+    return;
+  }
+  if (button === 2) {
+    sendNativeButtonAction("right_click_current", "right_tap", point);
+  }
+}
+
+function beginNativePan(event) {
+  state.panActive = true;
+  state.panLastClient = { x: event.clientX, y: event.clientY };
+  if (state.cameraScale <= 1) {
+    const focus = viewerPointToSourceNormalized(event.clientX, event.clientY, { useCameraTransform: false });
+    if (focus) setCameraFocus(focus.x, focus.y);
+    setCameraScale(2, { snap: false });
+  }
+  showGestureStatus("Move screen");
+  logGestureDiagnostic("native-pan-start", { reason: state.panChordMode, state: "active" });
+}
+
+function updateNativePan(event) {
+  const previous = state.panLastClient || { x: event.clientX, y: event.clientY };
+  const deltaX = event.clientX - previous.x;
+  const deltaY = event.clientY - previous.y;
+  state.panLastClient = { x: event.clientX, y: event.clientY };
+  if (deltaX || deltaY) {
+    panCameraByClientDelta(deltaX, deltaY);
+  }
+}
+
 function handleNativeMouseDown(event) {
   if (!state.selectedWindow) return;
   event.preventDefault();
@@ -4708,23 +4786,43 @@ function handleNativeMouseDown(event) {
   if (!point) return;
   state.nativeMousePoint = point;
   state.nativeMousePointerId = event.pointerId;
-  if (event.button === 0) {
-    state.nativeMouseLeftDown = true;
-    setPointerCaptureSafely(event);
-    sendNativeButtonAction("down_current", "down", point);
+  setPointerCaptureSafely(event);
+  const pair = panChordButtons();
+  if (pair && pair.includes(event.button)) {
+    state.panChordHeld.add(event.button);
+    if (pair.every((button) => state.panChordHeld.has(button))) {
+      pair.forEach((button) => {
+        const pending = state.panChordPending.get(button);
+        if (pending) {
+          window.clearTimeout(pending.timer);
+          state.panChordPending.delete(button);
+        }
+        state.panChordSuppressed.add(button);
+      });
+      beginNativePan(event);
+      return;
+    }
+    const button = event.button;
+    const timer = window.setTimeout(() => {
+      state.panChordPending.delete(button);
+      if (!state.panActive && !state.panChordSuppressed.has(button)) {
+        performNativeButtonDown(button, point);
+      }
+    }, PAN_CHORD_WINDOW_MS);
+    state.panChordPending.set(button, { timer, point });
     return;
   }
-  if (event.button === 1) {
-    sendNativeButtonAction("middle_click_current", "middle_tap", point);
-    return;
-  }
-  if (event.button === 2) {
-    sendNativeButtonAction("right_click_current", "right_tap", point);
-  }
+  performNativeButtonDown(event.button, point);
 }
 
 function handleNativeMouseMove(event) {
   if (!state.selectedWindow) return;
+  if (state.panActive) {
+    event.preventDefault();
+    recordNativeMouseEvent(event);
+    updateNativePan(event);
+    return;
+  }
   const point = viewerPointToSourceNormalized(event.clientX, event.clientY);
   if (!point) return;
   event.preventDefault();
@@ -4733,7 +4831,37 @@ function handleNativeMouseMove(event) {
 }
 
 function handleNativeMouseUp(event) {
-  if (!state.selectedWindow || event.button !== 0 || !state.nativeMouseLeftDown) return;
+  if (!state.selectedWindow) return;
+  const pair = panChordButtons();
+  if (pair && pair.includes(event.button)) {
+    event.preventDefault();
+    recordNativeMouseEvent(event);
+    state.panChordHeld.delete(event.button);
+    const pending = state.panChordPending.get(event.button);
+    if (pending) {
+      window.clearTimeout(pending.timer);
+      state.panChordPending.delete(event.button);
+      if (!state.panActive && !state.panChordSuppressed.has(event.button)) {
+        performNativeButtonDown(event.button, pending.point);
+      }
+    }
+    state.panChordSuppressed.delete(event.button);
+    if (state.panActive && !pair.every((button) => state.panChordHeld.has(button))) {
+      state.panActive = false;
+      logGestureDiagnostic("native-pan-end", { reason: "chord-release", state: "idle" });
+    }
+    if (!state.panChordHeld.size) state.panChordSuppressed.clear();
+    if (event.button === 0 && state.nativeMouseLeftDown) {
+      state.nativeMouseLeftDown = false;
+      state.nativeMousePointerId = null;
+      releasePointerCaptureSafely(event.pointerId, "native-up");
+      if (!sendNativePointerMessage("up_current")) {
+        sendPointer("up_current", { pointerType: "mouse" });
+      }
+    }
+    return;
+  }
+  if (event.button !== 0 || !state.nativeMouseLeftDown) return;
   event.preventDefault();
   recordNativeMouseEvent(event);
   state.nativeMouseLeftDown = false;
@@ -6561,6 +6689,9 @@ if (elements.followBluetoothMouse) {
 }
 if (elements.followBluetoothMouseControls) {
   elements.followBluetoothMouseControls.addEventListener("change", (event) => setFollowBluetoothMouse(event.target.checked));
+}
+if (elements.panChord) {
+  elements.panChord.addEventListener("change", (event) => setPanChordMode(event.target.value));
 }
 if (elements.nativeInputCapture) {
   elements.nativeInputCapture.addEventListener("blur", () => {

@@ -298,6 +298,11 @@ def test_physical_input_passthrough_assets_are_wired() -> None:
     assert "FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY" in script
     assert "setFollowBluetoothMouse" in script
     assert "syncFollowBluetoothMouseControls" in script
+    assert "PAN_CHORD_STORAGE_KEY" in script
+    assert "PAN_CHORD_PAIRS" in script
+    assert "setPanChordMode" in script
+    assert "cancelNativePan" in script
+    assert 'id="panChord"' in html
     assert 'pointerType: "mouse"' in script
     assert 'event.pointerType === "mouse"' in script
     assert "handleNativeMouseMove" in script

@@ -2459,13 +2459,22 @@ function queueJsonPost(path, payload) {
   });
 }
 
+function followBluetoothMousePoint(point) {
+  if (!state.followBluetoothMouse || !point || state.cameraScale <= 1) return;
+  state.cursorPosition = {
+    x: clampRatio(point.x),
+    y: clampRatio(point.y),
+    visible: true,
+  };
+  syncCameraToCursor();
+}
+
 function handlePointerResponse(response, action = "", pointerType = "") {
   if (response?.cursor) {
-    const mousePointer = pointerType === "mouse";
-    const follow = mousePointer ? state.followBluetoothMouse : state.followMouse;
+    const trackpadFollow = pointerType !== "mouse" && action === "move_relative";
     updateCursorPosition(response.cursor, {
-      allowMouseFollow: action === "move_relative" || mousePointer,
-      follow,
+      allowMouseFollow: trackpadFollow,
+      follow: state.followMouse,
     });
     if (action === "click_current") {
       setTypingAnchorFromCursor(response.cursor);
@@ -4582,6 +4591,7 @@ function sendNativeButtonAction(currentAction, moveAction, point) {
     return;
   }
   state.nativeSyncedPoint = { ...point };
+  followBluetoothMousePoint(point);
   sendPointer(moveAction, { ...point, pointerType: "mouse" });
 }
 
@@ -4617,6 +4627,7 @@ function handleNativeMouseMove(event) {
   recordNativeMouseEvent(event);
   state.nativeMousePoint = point;
   state.nativeSyncedPoint = { ...point };
+  followBluetoothMousePoint(point);
   sendPointer("move", { ...point, pointerType: "mouse" });
 }
 
@@ -4671,6 +4682,7 @@ function handleNativeWheel(event) {
   if (point && !nativePointSynced(point)) {
     state.nativeMousePoint = point;
     state.nativeSyncedPoint = { ...point };
+    followBluetoothMousePoint(point);
     sendPointer("move", { ...point, pointerType: "mouse" });
   }
   sendPointer("wheel_current", { delta, pointerType: "mouse" });

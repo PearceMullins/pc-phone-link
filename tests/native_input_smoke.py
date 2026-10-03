@@ -209,46 +209,60 @@ def main() -> None:
                   delete window.__secureDesktopActive;
 
                   const savedFocus = { ...state.cameraFocus };
-                  setCameraScale(2, { snap: false });
-                  handlePointerResponse({ cursor: { x: 0.22, y: 0.66, visible: true } }, "move", "mouse");
-                  const followedMouse = Math.abs(state.cameraFocus.x - 0.22) < 0.01
-                    && Math.abs(state.cameraFocus.y - 0.66) < 0.01;
-                  handlePointerResponse({ cursor: { x: 0.5, y: 0.5, visible: true } }, "move", "");
-                  const followIgnoredForTouch = Math.abs(state.cameraFocus.x - 0.22) < 0.01;
-                  setFollowBluetoothMouse(false);
-                  handlePointerResponse({ cursor: { x: 0.8, y: 0.2, visible: true } }, "move", "mouse");
-                  const followDisabled = Math.abs(state.cameraFocus.x - 0.22) < 0.01;
-                  const followStoredOff = localStorage.getItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY) === "false"
-                    && elements.followBluetoothMouse.checked === false
-                    && elements.followBluetoothMouseControls.checked === false;
-                  elements.followBluetoothMouseControls.checked = true;
-                  elements.followBluetoothMouseControls.dispatchEvent(new Event('change', { bubbles: true }));
-                  const controlsToggleEnabled = state.followBluetoothMouse === true
-                    && elements.followBluetoothMouse.checked === true
-                    && elements.followBluetoothMouseControls.checked === true;
-                  setFollowBluetoothMouse(false);
-                  state.followMouse = true;
-                  handlePointerResponse({ cursor: { x: 0.9, y: 0.1, visible: true } }, "move", "mouse");
-                  const followIndependentOfTrackpad = Math.abs(state.cameraFocus.x - 0.22) < 0.01;
+                  const savedFollowMouseSetting = state.followMouse;
                   state.followMouse = false;
-                  setFollowBluetoothMouse(true);
-                  const followStoredOn = localStorage.getItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY) === "true";
-
                   setCameraScale(2, { snap: false });
+                  state.cameraFocus = { x: 0.5, y: 0.5 };
+                  applyCameraTransform();
+
+                  setFollowBluetoothMouse(true);
                   const hoverTarget = { x: center.x + 70, y: center.y - 40 };
                   const expectedHoverFocus = viewerPointToSourceNormalized(hoverTarget.x, hoverTarget.y);
                   pointer('pointermove', 21, hoverTarget.x, hoverTarget.y);
+                  const followImmediate = Boolean(expectedHoverFocus)
+                    && Math.abs(state.cameraFocus.x - expectedHoverFocus.x) < 0.02
+                    && Math.abs(state.cameraFocus.y - expectedHoverFocus.y) < 0.02;
                   await drain();
                   const followOnHover = Boolean(expectedHoverFocus)
                     && Math.abs(state.cameraFocus.x - expectedHoverFocus.x) < 0.02
                     && Math.abs(state.cameraFocus.y - expectedHoverFocus.y) < 0.02;
                   const centeredOnHover = Math.abs(state.cameraFocus.x - state.cursorPosition.x) < 0.02
                     && Math.abs(state.cameraFocus.y - state.cursorPosition.y) < 0.02;
+
+                  const focusBeforeResponse = { ...state.cameraFocus };
+                  handlePointerResponse({ cursor: { x: 0.1, y: 0.9, visible: true } }, "move", "mouse");
+                  const responseFollowSuppressed = Math.abs(state.cameraFocus.x - focusBeforeResponse.x) < 0.001
+                    && Math.abs(state.cameraFocus.y - focusBeforeResponse.y) < 0.001;
+                  handlePointerResponse({ cursor: { x: 0.4, y: 0.4, visible: true } }, "move", "");
+                  const followIgnoredForTouch = Math.abs(state.cameraFocus.x - focusBeforeResponse.x) < 0.001;
+
                   setFollowBluetoothMouse(false);
+                  const focusBeforeDisabled = { ...state.cameraFocus };
                   pointer('pointermove', 22, hoverTarget.x - 30, hoverTarget.y - 25);
                   await drain();
-                  const hoverFollowDisabled = Math.abs(state.cameraFocus.x - expectedHoverFocus.x) < 0.02;
+                  const followDisabled = Math.abs(state.cameraFocus.x - focusBeforeDisabled.x) < 0.001
+                    && Math.abs(state.cameraFocus.y - focusBeforeDisabled.y) < 0.001;
+                  const followStoredOff = localStorage.getItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY) === "false"
+                    && elements.followBluetoothMouse.checked === false
+                    && elements.followBluetoothMouseControls.checked === false;
+
+                  elements.followBluetoothMouseControls.checked = true;
+                  elements.followBluetoothMouseControls.dispatchEvent(new Event('change', { bubbles: true }));
+                  const controlsToggleEnabled = state.followBluetoothMouse === true
+                    && elements.followBluetoothMouse.checked === true
+                    && elements.followBluetoothMouseControls.checked === true;
+
+                  setFollowBluetoothMouse(false);
+                  state.followMouse = true;
+                  const focusBeforeTrackpadOnly = { ...state.cameraFocus };
+                  pointer('pointermove', 23, hoverTarget.x - 60, hoverTarget.y + 30);
+                  await drain();
+                  const followIndependentOfTrackpad = Math.abs(state.cameraFocus.x - focusBeforeTrackpadOnly.x) < 0.001
+                    && Math.abs(state.cameraFocus.y - focusBeforeTrackpadOnly.y) < 0.001;
+                  state.followMouse = savedFollowMouseSetting;
                   setFollowBluetoothMouse(true);
+                  const followStoredOn = localStorage.getItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY) === "true";
+
                   setCameraScale(1, { snap: false });
                   state.cameraFocus = savedFocus;
                   applyCameraTransform();
@@ -388,10 +402,9 @@ def main() -> None:
                   delete window.__nativeRealToken;
                   return {
                     defaultOff, defaultInvert, defaultFollow, enabled, statusAfterEnable, statusAfterMouse, hoverActions,
-                    echoSuppressed, realTouchActions, secureNoticeShown, secureNoticeHidden,
-                    followedMouse, followIgnoredForTouch, allMousePointers,
+                    echoSuppressed, realTouchActions, secureNoticeShown, secureNoticeHidden, allMousePointers,
                     followDisabled, followStoredOff, followIndependentOfTrackpad, followStoredOn, controlsToggleEnabled,
-                    followOnHover, centeredOnHover, hoverFollowDisabled,
+                    followImmediate, followOnHover, centeredOnHover, responseFollowSuppressed, followIgnoredForTouch,
                     restartRequested, reconnectScheduled, restartConfirmCancelled,
                     dragActions, dragReleased, unsyncedClickActions, clickActions,
                     unsyncedWheelCalls, syncedWheelCalls, invertedWheelCalls, invertStored,
@@ -413,12 +426,11 @@ def main() -> None:
             assert report["allMousePointers"], report
             assert report["restartRequested"] and report["reconnectScheduled"], report
             assert report["restartConfirmCancelled"], report
-            assert report["followedMouse"] and report["followIgnoredForTouch"], report
             assert report["followDisabled"] and report["followStoredOff"], report
             assert report["followIndependentOfTrackpad"] and report["followStoredOn"], report
             assert report["controlsToggleEnabled"], report
-            assert report["followOnHover"] and report["centeredOnHover"], report
-            assert report["hoverFollowDisabled"], report
+            assert report["followImmediate"] and report["followOnHover"] and report["centeredOnHover"], report
+            assert report["responseFollowSuppressed"] and report["followIgnoredForTouch"], report
             assert report["dragActions"] == ["down_current", "move", "up_current"], report
             assert report["dragReleased"], report
             assert report["unsyncedClickActions"] == ["down", "up_current"], report

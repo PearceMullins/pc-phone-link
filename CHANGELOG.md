@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Live mouse input channel** - Bluetooth mouse movement, clicks, and wheel now travel over the `/ws/input` WebSocket instead of one HTTP request at a time, so the PC pointer tracks the phone-side mouse at input rate; the request path stays as an automatic fallback, and high-rate move logging is quieted so the input loop stays free
+- **UI build indicator** - Settings shows the loaded UI build number so you can confirm the phone picked up the newest files
 - **Physical mouse and keyboard passthrough** - Optional Settings toggle sends a Bluetooth mouse and keyboard paired to the phone straight to the PC: pointer movement, left/right/middle clicks, wheel scrolling, click-and-drag, double click, and scancode-level keystrokes with real Shift, Ctrl, Alt, and Win shortcuts
 - **Type without tapping** - While passthrough is on, physical keyboard keys reach the PC immediately with no focus tap; focus returns to the PC view after using phone buttons, and tapping a text field or the Keyboard composer keeps local typing
 - **Keyboard status line** - Settings shows whether the app is waiting for a key or receiving them, and Settings re-focuses the capture field when the page regains focus

@@ -5,8 +5,10 @@ from unittest import mock
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from phone_link import app as app_module
+from phone_link import gesture_diagnostics
 from phone_link import windows_host
 
 STATIC = Path(__file__).parents[1] / "phone_link" / "static"
@@ -206,6 +208,45 @@ def test_secure_desktop_route_reports_host_state() -> None:
     assert response.json() == {"active": True}
 
 
+def test_input_socket_forwards_pointer_messages() -> None:
+    application = app_module.create_app(connect_code="1234")
+    application.state.paired_browsers = [{"token": "test-token"}]
+    with (
+        mock.patch.object(app_module, "touch_paired_browser", return_value=True),
+        mock.patch.object(app_module, "handle_pointer") as pointer,
+        TestClient(application) as client,
+    ):
+        with client.websocket_connect("/ws/input?token=test-token") as socket:
+            socket.send_json({"type": "pointer", "hwnd": 55, "action": "move", "x": 0.25, "y": 0.75, "delta": 0})
+
+    pointer.assert_called_once_with(hwnd=55, action="move", x_ratio=0.25, y_ratio=0.75, delta=0)
+
+
+def test_input_socket_rejects_unpaired_tokens() -> None:
+    application = app_module.create_app(connect_code="1234")
+    application.state.paired_browsers = []
+    with (
+        mock.patch.object(app_module, "touch_paired_browser", return_value=False),
+        TestClient(application) as client,
+    ):
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws/input?token=stale") as socket:
+                socket.receive_json()
+
+
+def test_log_gesture_skips_context_free_pointer_chatter(tmp_path, monkeypatch) -> None:
+    log_path = tmp_path / "gesture-events.jsonl"
+    monkeypatch.setattr(gesture_diagnostics, "GESTURE_LOG_PATH", log_path)
+
+    gesture_diagnostics.log_gesture("win32-action-start", {"action": "move"})
+    assert not log_path.exists()
+
+    with gesture_diagnostics.gesture_context({"request_id": "request-1"}):
+        gesture_diagnostics.log_gesture("win32-action-start", {"action": "move"})
+
+    assert "win32-action-start" in log_path.read_text(encoding="utf-8")
+
+
 def test_host_restart_assets_are_wired() -> None:
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     script = (STATIC / "app.js").read_text(encoding="utf-8")
@@ -236,6 +277,12 @@ def test_physical_input_passthrough_assets_are_wired() -> None:
     assert 'src="/assets/keyboard-keys.js?' in html
     assert (STATIC / "keyboard-keys.js").is_file()
     assert "NATIVE_INPUT_STORAGE_KEY" in script
+    assert "INPUT_SOCKET_MAX_FAILURES" in script
+    assert "openInputSocket" in script
+    assert "sendNativePointerMessage" in script
+    assert "queueNativeMove" in script
+    assert "UI_BUILD" in script
+    assert 'id="uiBuild"' in html
     assert "/key-event`" in script
     assert "PCPhoneLinkKeyboardKeys" in script
     assert "nativeInputStatus" in script

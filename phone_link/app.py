@@ -80,6 +80,7 @@ from .windows_host import (
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
 UVICORN_LOG_LEVELS = frozenset({"critical", "error", "warning", "info", "debug", "trace"})
+HIGH_RATE_POINTER_ACTIONS = frozenset({"move", "move_relative", "wheel", "wheel_current"})
 
 
 class ActivateRequest(BaseModel):
@@ -821,7 +822,9 @@ def create_app(connect_code: str, default_fps: int = 20, wake_relay_url: str | N
     def _dispatch_websocket_message(payload: dict[str, Any]) -> None:
         message_type = str(payload.get("type", "")).strip().lower()
         hwnd = int(payload.get("hwnd", 0))
-        log_event("host", "websocket-message-received", _summarize_websocket_payload(payload))
+        action = str(payload.get("action", "")).strip().lower()
+        if message_type != "pointer" or action not in HIGH_RATE_POINTER_ACTIONS:
+            log_event("host", "websocket-message-received", _summarize_websocket_payload(payload))
 
         if hwnd <= 0 and hwnd != FULLSCREEN_TARGET_HWND:
             raise ValueError("A target window handle is required.")

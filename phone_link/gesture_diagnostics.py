@@ -49,11 +49,17 @@ def current_gesture_context() -> dict[str, Any]:
     return dict(_CONTEXT.get())
 
 
+_CONTEXT_FREE_QUIET_EVENTS = frozenset({"win32-action-start", "win32-action-result"})
+
+
 def log_gesture(event: str, details: dict[str, Any] | None = None, *, level: str = "info") -> None:
+    safe_event = _safe_event(event)
+    if safe_event in _CONTEXT_FREE_QUIET_EVENTS and not current_gesture_context():
+        return
     payload = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
         "level": "error" if level.lower() == "error" else "info",
-        "event": _safe_event(event),
+        "event": safe_event,
         "details": {**current_gesture_context(), **_safe_details(details or {})},
     }
     encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":")) + "\n"

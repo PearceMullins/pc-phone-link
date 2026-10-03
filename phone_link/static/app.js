@@ -109,6 +109,10 @@ const state = {
   nativeMouseCount: 0,
   lastMousePointerAt: 0,
   lastMousePointerPoint: null,
+  inputSocket: null,
+  inputSocketReady: false,
+  inputSocketReconnectTimer: null,
+  inputSocketFailures: 0,
   secureDesktopActive: false,
   secureDesktopTimer: null,
   secureDesktopPollInFlight: false,
@@ -178,6 +182,8 @@ const POINTER_SHORTCUT_STORAGE_KEY = "pc-phone-link-pointer-shortcut";
 const BOTTOM_NAV_STORAGE_KEY = "pc-phone-link-bottom-nav";
 const GESTURE_DIAGNOSTICS_STORAGE_KEY = "pc-phone-link-gesture-diagnostics";
 const NATIVE_INPUT_STORAGE_KEY = "pc-phone-link-native-input";
+const INPUT_SOCKET_MAX_FAILURES = 5;
+const UI_BUILD = "20260921o";
 const INVERT_WHEEL_STORAGE_KEY = "pc-phone-link-invert-wheel";
 const FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY = "pc-phone-link-follow-bluetooth-mouse";
 const MAX_GESTURE_LOG_BUFFER = 240;
@@ -349,6 +355,7 @@ const elements = {
   followBluetoothMouse: document.getElementById("followBluetoothMouse"),
   followBluetoothMouseControls: document.getElementById("followBluetoothMouseControls"),
   secureDesktopNotice: document.getElementById("secureDesktopNotice"),
+  uiBuild: document.getElementById("uiBuild"),
   restartHost: document.getElementById("restartHost"),
   powerMenu: document.getElementById("powerMenu"),
   powerToggle: document.getElementById("powerToggle"),
@@ -1633,6 +1640,7 @@ function loadViewerPreferences() {
   }
 
   if (elements.gestureDiagnostics) elements.gestureDiagnostics.checked = state.gestureDiagnosticsEnabled;
+  if (elements.uiBuild) elements.uiBuild.textContent = UI_BUILD;
   if (elements.nativeInput) elements.nativeInput.checked = state.nativeInputEnabled;
   if (elements.invertWheel) elements.invertWheel.checked = state.invertWheel;
   syncFollowBluetoothMouseControls();
@@ -1922,6 +1930,7 @@ async function finishPairing(accessToken) {
   window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, accessToken);
   elements.authPanel.classList.add("hidden");
   syncConnectControls();
+  openInputSocket();
   const connected = await bootstrap({ quiet: true });
   if (!connected) {
     elements.authPanel.classList.remove("hidden");
@@ -2059,6 +2068,7 @@ function clearAuthRequiredVerification() {
 
 function showAuthRequiredScreen(message = AUTH_REQUIRED_MESSAGE) {
   clearAuthRequiredVerification();
+  closeInputSocket();
   state.token = null;
   window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
   elements.authPanel.classList.remove("hidden");
@@ -2457,6 +2467,93 @@ function queueJsonPost(path, payload) {
       if (pointerDiagnostic) state.pointerQueueDepth = Math.max(0, state.pointerQueueDepth - 1);
     }
   });
+}
+
+function inputSocketUrl() {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/ws/input?token=${encodeURIComponent(state.token || "")}`;
+}
+
+function openInputSocket() {
+  if (!state.token || state.inputSocket || typeof WebSocket !== "function") return;
+  if (state.inputSocketFailures >= INPUT_SOCKET_MAX_FAILURES) return;
+  let socket;
+  try {
+    socket = new WebSocket(inputSocketUrl());
+  } catch {
+    state.inputSocketFailures += 1;
+    scheduleInputSocketReconnect();
+    return;
+  }
+  state.inputSocket = socket;
+  socket.onopen = () => {
+    state.inputSocketReady = true;
+    state.inputSocketFailures = 0;
+  };
+  socket.onclose = () => {
+    state.inputSocketReady = false;
+    state.inputSocket = null;
+    state.inputSocketFailures += 1;
+    scheduleInputSocketReconnect();
+  };
+  socket.onerror = () => {
+    state.inputSocketReady = false;
+  };
+}
+
+function closeInputSocket() {
+  window.clearTimeout(state.inputSocketReconnectTimer);
+  state.inputSocketReconnectTimer = null;
+  state.inputSocketFailures = 0;
+  state.inputSocketReady = false;
+  const socket = state.inputSocket;
+  state.inputSocket = null;
+  if (!socket) return;
+  socket.onopen = null;
+  socket.onclose = null;
+  socket.onerror = null;
+  try {
+    socket.close();
+  } catch {
+    /* already closed */
+  }
+}
+
+function scheduleInputSocketReconnect() {
+  if (!state.token || state.inputSocketReconnectTimer) return;
+  if (state.inputSocketFailures >= INPUT_SOCKET_MAX_FAILURES) return;
+  state.inputSocketReconnectTimer = window.setTimeout(() => {
+    state.inputSocketReconnectTimer = null;
+    openInputSocket();
+  }, 2000);
+}
+
+function sendNativePointerMessage(action, point, delta = 0) {
+  const socket = state.inputSocket;
+  if (!state.inputSocketReady || !socket || socket.readyState !== WebSocket.OPEN || !state.selectedWindow) {
+    return false;
+  }
+  try {
+    socket.send(JSON.stringify({
+      type: "pointer",
+      hwnd: state.selectedWindow.hwnd,
+      action,
+      x: point ? point.x : 0.5,
+      y: point ? point.y : 0.5,
+      delta,
+    }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function queueNativeMove(point) {
+  followBluetoothMousePoint(point);
+  state.nativeMousePoint = point;
+  state.nativeSyncedPoint = { ...point };
+  if (sendNativePointerMessage("move", point)) return;
+  sendPointer("move", { ...point, pointerType: "mouse" });
 }
 
 function followBluetoothMousePoint(point) {
@@ -4500,6 +4597,7 @@ function setNativeInputEnabled(enabled) {
     elements.nativeInputCapture?.blur();
     return;
   }
+  openInputSocket();
   focusNativeInputCapture({ force: true });
   showToast("Physical mouse and keyboard now pass through to the PC.");
 }
@@ -4574,7 +4672,9 @@ function releaseNativeMouseButton(reason) {
   state.nativeMouseLeftDown = false;
   state.nativeMousePointerId = null;
   if (!state.selectedWindow) return;
-  sendPointer("up_current", { pointerType: "mouse" });
+  if (!sendNativePointerMessage("up_current")) {
+    sendPointer("up_current", { pointerType: "mouse" });
+  }
   logGestureDiagnostic("native-mouse-release", { reason, state: "released" });
 }
 
@@ -4587,12 +4687,16 @@ function nativePointSynced(point) {
 
 function sendNativeButtonAction(currentAction, moveAction, point) {
   if (nativePointSynced(point)) {
-    sendPointer(currentAction, { pointerType: "mouse" });
+    if (!sendNativePointerMessage(currentAction)) {
+      sendPointer(currentAction, { pointerType: "mouse" });
+    }
     return;
   }
   state.nativeSyncedPoint = { ...point };
   followBluetoothMousePoint(point);
-  sendPointer(moveAction, { ...point, pointerType: "mouse" });
+  if (!sendNativePointerMessage(moveAction, point)) {
+    sendPointer(moveAction, { ...point, pointerType: "mouse" });
+  }
 }
 
 function handleNativeMouseDown(event) {
@@ -4625,10 +4729,7 @@ function handleNativeMouseMove(event) {
   if (!point) return;
   event.preventDefault();
   recordNativeMouseEvent(event);
-  state.nativeMousePoint = point;
-  state.nativeSyncedPoint = { ...point };
-  followBluetoothMousePoint(point);
-  sendPointer("move", { ...point, pointerType: "mouse" });
+  queueNativeMove(point);
 }
 
 function handleNativeMouseUp(event) {
@@ -4638,7 +4739,9 @@ function handleNativeMouseUp(event) {
   state.nativeMouseLeftDown = false;
   state.nativeMousePointerId = null;
   releasePointerCaptureSafely(event.pointerId, "native-up");
-  sendPointer("up_current", { pointerType: "mouse" });
+  if (!sendNativePointerMessage("up_current")) {
+    sendPointer("up_current", { pointerType: "mouse" });
+  }
 }
 
 function applePointerDevice() {
@@ -4683,9 +4786,13 @@ function handleNativeWheel(event) {
     state.nativeMousePoint = point;
     state.nativeSyncedPoint = { ...point };
     followBluetoothMousePoint(point);
-    sendPointer("move", { ...point, pointerType: "mouse" });
+    if (!sendNativePointerMessage("move", point)) {
+      sendPointer("move", { ...point, pointerType: "mouse" });
+    }
   }
-  sendPointer("wheel_current", { delta, pointerType: "mouse" });
+  if (!sendNativePointerMessage("wheel_current", null, delta)) {
+    sendPointer("wheel_current", { delta, pointerType: "mouse" });
+  }
 }
 
 function secureDesktopPollingWanted() {

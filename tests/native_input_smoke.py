@@ -266,6 +266,23 @@ def main() -> None:
                   setCameraScale(1, { snap: false });
                   state.cameraFocus = savedFocus;
                   applyCameraTransform();
+
+                  const socketMessages = [];
+                  calls.splice(0);
+                  state.inputSocket = { readyState: 1, send: (data) => socketMessages.push(JSON.parse(data)) };
+                  state.inputSocketReady = true;
+                  const socketTarget = { x: center.x + 20, y: center.y + 15 };
+                  pointer('pointermove', 31, socketTarget.x, socketTarget.y);
+                  pointer('pointerdown', 31, socketTarget.x, socketTarget.y, { button: 0, buttons: 1 });
+                  pointer('pointerup', 31, socketTarget.x, socketTarget.y, { button: 0, buttons: 0 });
+                  await new Promise(resolve => setTimeout(resolve, 0));
+                  const socketActions = socketMessages.map(message => message.action);
+                  const socketPayloadsValid = socketMessages.length === 3
+                    && socketMessages.every(message => message.type === "pointer" && message.hwnd === state.selectedWindow.hwnd);
+                  const socketNoHttpFallback = calls.length === 0;
+                  state.inputSocket = null;
+                  state.inputSocketReady = false;
+                  calls.splice(0);
                   const mousePointerTypesRecorded = pointerTypes.filter(type => type && type !== "touch");
                   const allMousePointers = pointerTypes.includes("mouse")
                     && mousePointerTypesRecorded.every(type => type === "mouse");
@@ -405,6 +422,7 @@ def main() -> None:
                     echoSuppressed, realTouchActions, secureNoticeShown, secureNoticeHidden, allMousePointers,
                     followDisabled, followStoredOff, followIndependentOfTrackpad, followStoredOn, controlsToggleEnabled,
                     followImmediate, followOnHover, centeredOnHover, responseFollowSuppressed, followIgnoredForTouch,
+                    socketActions, socketPayloadsValid, socketNoHttpFallback,
                     restartRequested, reconnectScheduled, restartConfirmCancelled,
                     dragActions, dragReleased, unsyncedClickActions, clickActions,
                     unsyncedWheelCalls, syncedWheelCalls, invertedWheelCalls, invertStored,
@@ -431,6 +449,8 @@ def main() -> None:
             assert report["controlsToggleEnabled"], report
             assert report["followImmediate"] and report["followOnHover"] and report["centeredOnHover"], report
             assert report["responseFollowSuppressed"] and report["followIgnoredForTouch"], report
+            assert report["socketActions"] == ["move", "down_current", "up_current"], report
+            assert report["socketPayloadsValid"] and report["socketNoHttpFallback"], report
             assert report["dragActions"] == ["down_current", "move", "up_current"], report
             assert report["dragReleased"], report
             assert report["unsyncedClickActions"] == ["down", "up_current"], report

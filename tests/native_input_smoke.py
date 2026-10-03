@@ -210,7 +210,14 @@ def main() -> None:
                   handlePointerResponse({ cursor: { x: 0.8, y: 0.2, visible: true } }, "move", "mouse");
                   const followDisabled = Math.abs(state.cameraFocus.x - 0.22) < 0.01;
                   const followStoredOff = localStorage.getItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY) === "false"
-                    && elements.followBluetoothMouse.checked === false;
+                    && elements.followBluetoothMouse.checked === false
+                    && elements.followBluetoothMouseControls.checked === false;
+                  elements.followBluetoothMouseControls.checked = true;
+                  elements.followBluetoothMouseControls.dispatchEvent(new Event('change', { bubbles: true }));
+                  const controlsToggleEnabled = state.followBluetoothMouse === true
+                    && elements.followBluetoothMouse.checked === true
+                    && elements.followBluetoothMouseControls.checked === true;
+                  setFollowBluetoothMouse(false);
                   state.followMouse = true;
                   handlePointerResponse({ cursor: { x: 0.9, y: 0.1, visible: true } }, "move", "mouse");
                   const followIndependentOfTrackpad = Math.abs(state.cameraFocus.x - 0.22) < 0.01;
@@ -358,7 +365,7 @@ def main() -> None:
                     defaultOff, defaultInvert, defaultFollow, enabled, statusAfterEnable, statusAfterMouse, hoverActions,
                     echoSuppressed, realTouchActions, secureNoticeShown, secureNoticeHidden,
                     followedMouse, followIgnoredForTouch, allMousePointers,
-                    followDisabled, followStoredOff, followIndependentOfTrackpad, followStoredOn,
+                    followDisabled, followStoredOff, followIndependentOfTrackpad, followStoredOn, controlsToggleEnabled,
                     restartRequested, reconnectScheduled, restartConfirmCancelled,
                     dragActions, dragReleased, unsyncedClickActions, clickActions,
                     unsyncedWheelCalls, syncedWheelCalls, invertedWheelCalls, invertStored,
@@ -383,6 +390,7 @@ def main() -> None:
             assert report["followedMouse"] and report["followIgnoredForTouch"], report
             assert report["followDisabled"] and report["followStoredOff"], report
             assert report["followIndependentOfTrackpad"] and report["followStoredOn"], report
+            assert report["controlsToggleEnabled"], report
             assert report["dragActions"] == ["down_current", "move", "up_current"], report
             assert report["dragReleased"], report
             assert report["unsyncedClickActions"] == ["down", "up_current"], report

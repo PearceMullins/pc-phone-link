@@ -228,6 +228,7 @@ def test_physical_input_passthrough_assets_are_wired() -> None:
     assert 'id="nativeInputStatus"' in html
     assert 'id="invertWheel"' in html
     assert 'id="followBluetoothMouse"' in html
+    assert 'id="followBluetoothMouseControls"' in html
     assert 'id="nativeInputCapture" class="native-input-capture" type="text" readonly' in html
     assert 'inputmode="none"' not in html
     assert 'id="remoteView" alt="Selected window stream" draggable="false"' in html
@@ -249,6 +250,7 @@ def test_physical_input_passthrough_assets_are_wired() -> None:
     assert "syncSecureDesktopPolling" in script
     assert "FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY" in script
     assert "setFollowBluetoothMouse" in script
+    assert "syncFollowBluetoothMouseControls" in script
     assert 'pointerType: "mouse"' in script
     assert 'event.pointerType === "mouse"' in script
     assert "handleNativeMouseMove" in script

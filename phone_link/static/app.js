@@ -347,6 +347,7 @@ const elements = {
   nativeInputStatus: document.getElementById("nativeInputStatus"),
   invertWheel: document.getElementById("invertWheel"),
   followBluetoothMouse: document.getElementById("followBluetoothMouse"),
+  followBluetoothMouseControls: document.getElementById("followBluetoothMouseControls"),
   secureDesktopNotice: document.getElementById("secureDesktopNotice"),
   restartHost: document.getElementById("restartHost"),
   powerMenu: document.getElementById("powerMenu"),
@@ -1634,7 +1635,7 @@ function loadViewerPreferences() {
   if (elements.gestureDiagnostics) elements.gestureDiagnostics.checked = state.gestureDiagnosticsEnabled;
   if (elements.nativeInput) elements.nativeInput.checked = state.nativeInputEnabled;
   if (elements.invertWheel) elements.invertWheel.checked = state.invertWheel;
-  if (elements.followBluetoothMouse) elements.followBluetoothMouse.checked = state.followBluetoothMouse;
+  syncFollowBluetoothMouseControls();
   syncNativeInputUi();
   if (elements.mouseSpeed) elements.mouseSpeed.value = String(state.mouseSpeed);
   if (elements.followMouse) elements.followMouse.checked = state.followMouse;
@@ -4643,7 +4644,14 @@ function setInvertWheel(value) {
 function setFollowBluetoothMouse(value) {
   state.followBluetoothMouse = Boolean(value);
   window.localStorage.setItem(FOLLOW_BLUETOOTH_MOUSE_STORAGE_KEY, String(state.followBluetoothMouse));
+  syncFollowBluetoothMouseControls();
+}
+
+function syncFollowBluetoothMouseControls() {
   if (elements.followBluetoothMouse) elements.followBluetoothMouse.checked = state.followBluetoothMouse;
+  if (elements.followBluetoothMouseControls) {
+    elements.followBluetoothMouseControls.checked = state.followBluetoothMouse;
+  }
 }
 
 function handleNativeWheel(event) {
@@ -6424,6 +6432,9 @@ if (elements.invertWheel) {
 }
 if (elements.followBluetoothMouse) {
   elements.followBluetoothMouse.addEventListener("change", (event) => setFollowBluetoothMouse(event.target.checked));
+}
+if (elements.followBluetoothMouseControls) {
+  elements.followBluetoothMouseControls.addEventListener("change", (event) => setFollowBluetoothMouse(event.target.checked));
 }
 if (elements.nativeInputCapture) {
   elements.nativeInputCapture.addEventListener("blur", () => {
